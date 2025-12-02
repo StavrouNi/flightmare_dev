@@ -75,6 +75,16 @@ bool UnityBridge::disconnectUnity() {
 }
 
 bool UnityBridge::sendInitialSettings(void) {
+
+  for (size_t i = 0; i < settings_.objects.size(); i++) {
+    const auto &o = settings_.objects[i];
+    logger_.info(
+        "[UnityBridge]   obj[%zu]: ID=%s prefab=%s posUnity=(%.2f, %.2f, %.2f)",
+        i,
+        o.ID.c_str(),
+        o.prefab_ID.c_str(),
+        o.position[0], o.position[1], o.position[2]);
+  }
   // create new message object
   zmqpp::message msg;
   // add topic header
@@ -113,8 +123,27 @@ bool UnityBridge::getRender(const FrameID frame_id) {
     pub_msg_.vehicles[idx].rotation = quaternionRos2Unity(quad_state.q());
   }
 
+
   for (size_t idx = 0; idx < pub_msg_.objects.size(); idx++) {
     std::shared_ptr<StaticObject> gate = static_objects_[idx];
+    // Eigen::Vector3f gp = gate->getPosition();
+    // Eigen::Vector3f qp = quad_state.p;  // from previous loop over vehicles
+    // float dist = (gp - qp).norm();
+
+    // logger_.info(
+    //   "[UnityBridge] getRender(frame %d): object %zu pos=(%.2f, %.2f, %.2f)",
+    //   frame_id, idx,
+    //   static_objects_[idx]->getPosition()(0),
+    //   static_objects_[idx]->getPosition()(1),
+    //   static_objects_[idx]->getPosition()(2));
+
+    // logger_.info(
+    //   "[UnityBridge] getRender(frame %d): object %zu pos=(%.2f, %.2f, %.2f), "
+    //   "dist_to_quad=%.2f",
+    //   frame_id, idx,
+    //   gp(0), gp(1), gp(2),
+    //   dist);
+
     pub_msg_.objects[idx].position = positionRos2Unity(gate->getPosition());
     pub_msg_.objects[idx].rotation = quaternionRos2Unity(gate->getQuaternion());
   }
@@ -199,7 +228,7 @@ bool UnityBridge::addStaticObject(std::shared_ptr<StaticObject> static_object) {
 }
 
 bool UnityBridge::handleOutput() {
-  // create new message object
+  // create new message 
   zmqpp::message msg;
   sub_.receive(msg);
   // unpack message metadata

@@ -42,6 +42,16 @@ endif()
 
 message(STATUS "Eigen3 include dir: ${EIGEN3_INCLUDE_DIR}")
 
+# Force the Python version for pybind11 / CMake
+find_package(Python3 3.7 EXACT COMPONENTS Interpreter Development REQUIRED)
+message(STATUS "Using Python3 from: ${Python3_EXECUTABLE}")
+
+# Propagate to all usual variables that might be used
+set(Python_EXECUTABLE         ${Python3_EXECUTABLE})
+set(PYTHON_EXECUTABLE         ${Python3_EXECUTABLE})
+set(PYBIND11_PYTHON_EXECUTABLE ${Python3_EXECUTABLE})
+set(PYBIND11_PYTHON_VERSION   3.7)
+
 # Including dependencies 
 include(cmake/pybind11.cmake)
 include(cmake/yaml.cmake)

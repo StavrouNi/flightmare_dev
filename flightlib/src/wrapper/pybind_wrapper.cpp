@@ -31,6 +31,30 @@ PYBIND11_MODULE(flightgym, m) {
     .def("getObsDim", &VecEnv<QuadrotorEnv>::getObsDim)
     .def("getActDim", &VecEnv<QuadrotorEnv>::getActDim)
     .def("getExtraInfoNames", &VecEnv<QuadrotorEnv>::getExtraInfoNames)
+    .def("get_rgb_image",
+        [](VecEnv<QuadrotorEnv> &vec_env, int env_id) {
+          int h = 0, w = 0;
+          std::vector<uint8_t> buffer;
+          if (!vec_env.getRGBImage(env_id, buffer, h, w)) {
+            throw std::runtime_error("getRGBImage failed in VecEnv");
+          }
+
+          if (h <= 0 || w <= 0 ||
+              buffer.size() != static_cast<std::size_t>(h) *
+                              static_cast<std::size_t>(w) * 3) {
+            throw std::runtime_error("getRGBImage returned invalid size");
+          }
+
+          // Allocate NumPy array (H, W, 3) and copy data
+          py::array_t<uint8_t> img({h, w, 3});
+          std::memcpy(
+              img.mutable_data(),
+              buffer.data(),
+              buffer.size());
+
+          return img;
+        },
+        py::arg("env_id"))
     .def("__repr__", [](const VecEnv<QuadrotorEnv>& a) {
       return "RPG Drone Racing Environment";
     });

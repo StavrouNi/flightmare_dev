@@ -16,6 +16,9 @@
 #include "flightlib/common/types.hpp"
 #include "flightlib/envs/env_base.hpp"
 #include "flightlib/objects/quadrotor.hpp"
+#include "flightlib/sensors/rgb_camera.hpp"
+#include "flightlib/objects/static_gate.hpp"
+
 
 namespace flightlib {
 
@@ -58,7 +61,11 @@ class QuadrotorEnv final : public EnvBase {
   bool getObs(Ref<Vector<>> obs) override;
   bool getAct(Ref<Vector<>> act) const;
   bool getAct(Command *const cmd) const;
-
+  bool getRGBImage(
+      int env_id,
+      std::vector<uint8_t>& buffer,
+      int& height,
+      int& width) const;
   // - auxiliar functions
   bool isTerminalState(Scalar &reward) override;
   void addObjectsToUnity(std::shared_ptr<UnityBridge> bridge);
@@ -69,6 +76,9 @@ class QuadrotorEnv final : public EnvBase {
  private:
   // quadrotor
   std::shared_ptr<Quadrotor> quadrotor_ptr_;
+  std::vector<std::shared_ptr<RGBCamera>> rgb_cameras_;
+  // Store gates so they live as long as the env
+  std::vector<std::shared_ptr<StaticGate>> gates_;
   QuadState quad_state_;
   Command cmd_;
   Logger logger_{"QaudrotorEnv"};

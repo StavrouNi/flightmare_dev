@@ -54,7 +54,16 @@ class VecEnv {
   bool setUnity(bool render);
   bool connectUnity();
   void disconnectUnity();
-
+  bool getRGBImage(
+      int env_id,
+      std::vector<uint8_t>& buffer,
+      int& height,
+      int& width) const {
+    if (env_id < 0 || env_id >= static_cast<int>(envs_.size())) {
+      return false;
+    }
+    return envs_[env_id]->getRGBImage(env_id, buffer, height, width);
+  }
   // public functions
   inline int getSeed(void) { return seed_; };
   inline SceneID getSceneID(void) { return scene_id_; };
