@@ -19,3 +19,22 @@ _build/
 _posts
 _site
 
+
+# CMake build directories
+build/
+*/build/
+
+# External project auto-download directories
+flightlib/externals/
+*/externals/*-build/
+*/externals/*-src/
+*/externals/*-download/
+
+# Temporary output frames
+flightrl/examples/frames/
+
+# Unity build cache (optional but recommended)
+flightrender/Build/
+flightrender/Library/
+flightrender/Temp/
+flightrender/Logs/
