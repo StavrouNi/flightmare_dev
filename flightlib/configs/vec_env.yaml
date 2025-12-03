@@ -1,6 +1,6 @@
 env:
-  seed: 2
-  scene_id: 1 # 0 industrial, 1 warehouse, 3 natureforest
+  seed: 3
+  scene_id: 1 # 0 industrial, 1 warehouse, 2+ other scenes
   num_envs: 1
   num_threads: 1
-  render: yes
+  render: yes  # no = headless (no Unity window), camera still works

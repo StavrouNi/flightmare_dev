@@ -10,6 +10,7 @@ message(STATUS "======================  !Flightmare!  ======================")
 option(BUILD_TESTS "Building the tests" ON)
 option(BUILD_UNITY_BRIDGE_TESTS "Building the Unity Bridge tests" ON)
 option(BUILD_BENCH "Building the benchmark." OFF)
+option(BUILD_DEMOS "Building the demo executables" OFF)
 option(ENABLE_FAST "Build with optimizations for speed" ON)
 option(ENABLE_BLAS "Build using BLAS and LAPACK libraries" OFF)
 option(ENABLE_PARALLEL "Build using openmp parallelization" ON)
@@ -278,6 +279,22 @@ if(BUILD_UNITY_BRIDGE_TESTS AND FLIGHTLIB_UNITY_BRIDGE_TEST_SOURCES)
     gtest
     gtest_main)
 add_test(test_unity_bridge test_unity_bridge)
+endif()
+
+# Build demo executables
+if(BUILD_DEMOS)
+  message(STATUS "Building demo executables...")
+  
+  # spawn_gates_and_camera demo
+  add_executable(spawn_gates_and_camera 
+    src/demos/spawn_gates_and_camera.cpp)
+  target_link_libraries(spawn_gates_and_camera PRIVATE
+    ${LIBRARY_NAME}
+    ${OpenCV_LIBRARIES}
+    yaml-cpp
+    zmq
+    zmqpp
+    stdc++fs)
 endif()
 
 message(STATUS "================  !Done. No more nightmare!  ================")

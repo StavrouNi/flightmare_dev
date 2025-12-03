@@ -76,15 +76,6 @@ bool UnityBridge::disconnectUnity() {
 
 bool UnityBridge::sendInitialSettings(void) {
 
-  for (size_t i = 0; i < settings_.objects.size(); i++) {
-    const auto &o = settings_.objects[i];
-    logger_.info(
-        "[UnityBridge]   obj[%zu]: ID=%s prefab=%s posUnity=(%.2f, %.2f, %.2f)",
-        i,
-        o.ID.c_str(),
-        o.prefab_ID.c_str(),
-        o.position[0], o.position[1], o.position[2]);
-  }
   // create new message object
   zmqpp::message msg;
   // add topic header

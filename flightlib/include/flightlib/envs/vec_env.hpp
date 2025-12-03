@@ -54,16 +54,6 @@ class VecEnv {
   bool setUnity(bool render);
   bool connectUnity();
   void disconnectUnity();
-  bool getRGBImage(
-      int env_id,
-      std::vector<uint8_t>& buffer,
-      int& height,
-      int& width) const {
-    if (env_id < 0 || env_id >= static_cast<int>(envs_.size())) {
-      return false;
-    }
-    return envs_[env_id]->getRGBImage(env_id, buffer, height, width);
-  }
   // public functions
   inline int getSeed(void) { return seed_; };
   inline SceneID getSceneID(void) { return scene_id_; };
@@ -72,6 +62,18 @@ class VecEnv {
   inline int getActDim(void) { return act_dim_; };
   inline int getExtraInfoDim(void) { return extra_info_names_.size(); };
   inline int getNumOfEnvs(void) { return envs_.size(); };
+  bool getRGBImage(
+      int env_id,
+      int cam_id,
+      std::vector<uint8_t>& buffer,
+      int& height,
+      int& width) const {
+    if (env_id < 0 || env_id >= num_envs_) {
+      return false;
+    }
+    return envs_[env_id]->getRGBImage(cam_id, buffer, height, width);
+  }
+
   inline std::vector<std::string>& getExtraInfoNames() {
     return extra_info_names_;
   };

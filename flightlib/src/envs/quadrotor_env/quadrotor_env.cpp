@@ -1,9 +1,6 @@
 #include "flightlib/envs/quadrotor_env/quadrotor_env.hpp"
-#include <opencv2/core/core.hpp> 
+#include <opencv2/core/core.hpp>
 #include <cstring>
-#include <memory> 
-#include <vector>
-#include "flightlib/objects/static_gate.hpp"
 
 namespace flightlib {
 
@@ -35,52 +32,7 @@ QuadrotorEnv::QuadrotorEnv(const std::string &cfg_path)
   if (!quadrotor_ptr_->setWorldBox(world_box_)) {
     logger_.error("cannot set wolrd box");
   };
-  // --------- create static gates in the world --------------------------
-  // gates_.clear();
-  {
-    // Example: three gates in a straight line in front of the origin
-    std::vector<Eigen::Vector3f> gate_positions = {
-      {  10.0f, 0.0f, 1.0f},  // front
-      // { 10.0f,  0.0f, 1.5f},  // right
-      // {30.0f,  0.0f, 1.5f},  // left
-    };
-    for (size_t i = 0; i < gate_positions.size(); ++i) {
-      std::string object_id = "unity_gate_" + std::to_string(i);
-      std::string prefab_id = "rpg_gate";  // prefab in Assets/Resources
 
-      auto gate = std::make_shared<StaticGate>(object_id, prefab_id);
-      gate->setPosition(gate_positions[i]);
-
-      // Example orientation: gate faces +X
-      Quaternion q(std::cos(0.5 * M_PI_2), 0.0, 0.0, std::sin(0.5 * M_PI_2));
-      gate->setQuaternion(q);
-
-      gates_.push_back(gate);
-    }
-  }
-  // ---------------------------------------------------------------------
-  // --------- setup RGB camera attached to this quadrotor ----------
-  rgb_cameras_.clear();
-  {
-    auto rgb_cam = std::make_shared<RGBCamera>();
-
-    // camera pose in body frame (same as in docs example)
-    Vector<3> B_r_BC(0.0, 0.0, 0.3);
-    Matrix<3, 3> R_BC = Quaternion(1.0, 0.0, 0.0, 0.0).toRotationMatrix();
-
-    rgb_cam->setFOV(90);
-    rgb_cam->setWidth(720);   // adjust if you want different resolution
-    rgb_cam->setHeight(480);
-    rgb_cam->setRelPose(B_r_BC, R_BC);
-    // depth / segmentation / optical flow disabled for now
-    rgb_cam->setPostProcesscing(std::vector<bool>{false, false, false});
-
-    // attach to quadrotor
-    quadrotor_ptr_->addRGBCamera(rgb_cam);
-
-    rgb_cameras_.push_back(rgb_cam);
-  }
-  // ---------------------------------------------------------------------
   // define input and output dimension for the environment
   obs_dim_ = quadenv::kNObs;
   act_dim_ = quadenv::kNAct;
@@ -88,6 +40,37 @@ QuadrotorEnv::QuadrotorEnv(const std::string &cfg_path)
   Scalar mass = quadrotor_ptr_->getMass();
   act_mean_ = Vector<quadenv::kNAct>::Ones() * (-mass * Gz) / 4;
   act_std_ = Vector<quadenv::kNAct>::Ones() * (-mass * 2 * Gz) / 4;
+
+  // in constructor
+  // --- camera ---
+  auto rgb_cam = std::make_shared<RGBCamera>();
+  Vector<3> B_r_BC(0.0, 0.0, 0.3);
+  Matrix<3, 3> R_BC = Quaternion(1.0, 0.0, 0.0, 0.0).toRotationMatrix();
+  rgb_cam->setFOV(90);
+  rgb_cam->setWidth(720);
+  rgb_cam->setHeight(480);
+  rgb_cam->setRelPose(B_r_BC, R_BC);
+  rgb_cam->setPostProcesscing(std::vector<bool>{false, false, false});
+  quadrotor_ptr_->addRGBCamera(rgb_cam);
+  rgb_cameras_.push_back(rgb_cam);
+
+  // --- gates ---
+  std::string prefab_id = "rpg_gate";
+
+  auto gate_1 = std::make_shared<StaticGate>("unity_gate_1", prefab_id);
+  gate_1->setPosition(Eigen::Vector3f(-10.0f, 10.0f, 2.5f));
+  Scalar gate_yaw = M_PI;
+  gate_1->setQuaternion(
+    Quaternion(std::cos(0.5 * gate_yaw), 0.0, 0.0, std::sin(0.5 * gate_yaw)));
+
+  auto gate_2 = std::make_shared<StaticGate>("unity_gate_2", prefab_id);
+  gate_2->setPosition(Eigen::Vector3f(0.0f, 10.0f, 2.5f));
+  gate_2->setQuaternion(
+    Quaternion(std::cos(0.5 * gate_yaw), 0.0, 0.0, std::sin(0.5 * gate_yaw)));
+
+  gates_.clear();
+  gates_.push_back(gate_1);
+  gates_.push_back(gate_2);
 
   // load parameters
   loadParam(cfg_);
@@ -117,6 +100,9 @@ bool QuadrotorEnv::reset(Ref<Vector<>> obs, const bool random) {
     quad_state_.x(QS::ATTY) = uniform_dist_(random_gen_);
     quad_state_.x(QS::ATTZ) = uniform_dist_(random_gen_);
     quad_state_.qx /= quad_state_.qx.norm();
+  } else {
+    // Non-random reset: spawn at safe height above ground to avoid collisions
+    quad_state_.x(QS::POSZ) = 2.5;  // Start at 2.5m height
   }
   // reset quadrotor with random states
   quadrotor_ptr_->reset(quad_state_);
@@ -234,25 +220,24 @@ bool QuadrotorEnv::getAct(Command *const cmd) const {
 }
 
 bool QuadrotorEnv::getRGBImage(
-    int env_id,
+    int cam_id,
     std::vector<uint8_t>& buffer,
     int& height,
     int& width) const {
 
-  // single-environment: only env_id == 0 is valid
-  if (env_id != 0) {
-    logger_.error("getRGBImage: invalid env_id {}, expected 0", env_id);
+  if (cam_id < 0 || cam_id >= static_cast<int>(rgb_cameras_.size())) {
+    logger_.error("getRGBImage: invalid cam_id {} (have {} cameras)",
+                  cam_id, rgb_cameras_.size());
     return false;
   }
 
-  if (rgb_cameras_.empty() || !rgb_cameras_[0]) {
+  if (rgb_cameras_.empty() || !rgb_cameras_[cam_id]) {
     logger_.error("getRGBImage: RGB camera not initialized");
     return false;
   }
 
   cv::Mat img;
-  // RGBCamera fills img with a CV_8UC3 image
-  rgb_cameras_[0]->getRGBImage(img);
+  rgb_cameras_[cam_id]->getRGBImage(img);
 
   if (img.empty()) {
     logger_.error("getRGBImage: received empty image");
@@ -266,8 +251,9 @@ bool QuadrotorEnv::getRGBImage(
   height = img.rows;
   width  = img.cols;
 
-  const std::size_t n_bytes = static_cast<std::size_t>(height) *
-                              static_cast<std::size_t>(width) * 3;
+  const std::size_t n_bytes =
+      static_cast<std::size_t>(height) *
+      static_cast<std::size_t>(width) * 3;
 
   buffer.resize(n_bytes);
   std::memcpy(buffer.data(), img.data, n_bytes);
@@ -276,9 +262,7 @@ bool QuadrotorEnv::getRGBImage(
 }
 
 void QuadrotorEnv::addObjectsToUnity(std::shared_ptr<UnityBridge> bridge) {
-  // existing quadrotor registration
   bridge->addQuadrotor(quadrotor_ptr_);
-  logger_.info("Adding %zu gates to Unity", gates_.size());
   for (auto& gate : gates_) {
     bridge->addStaticObject(gate);
   }

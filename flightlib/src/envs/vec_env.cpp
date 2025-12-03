@@ -45,6 +45,8 @@ void VecEnv<EnvBase>::init(void) {
   }
 
   // set Unity
+  logger_.info("Setting Unity Render to %s.",
+                    unity_render_ ? "true" : "false");
   setUnity(unity_render_);
 
   obs_dim_ = envs_[0]->getObsDim();
@@ -202,18 +204,6 @@ void VecEnv<EnvBase>::curriculumUpdate(void) {
   for (int i = 0; i < num_envs_; i++) envs_[i]->curriculumUpdate();
 }
 
-// template<typename EnvBase>
-// std::ostream& operator<<(std::ostream& os, const VecEnv<EnvBase>& env) {
-//   os.precision(3);
-//   os << "Vectorized Environment:\n"
-//      << "obs dim =            [" << env.obs_dim_ << "]\n"
-//      << "act dim =            [" << env.act_dim_ << "]\n"
-//      << "num_envs =           [" << env.num_envs_ << "]\n"
-//      << "seed =               [" << env.seed_ << "]\n"
-//      << "scene_id =           [" << env.scene_id_ << std::endl;
-//   os.precision();
-//   return os;
-// }
 
 // IMPORTANT. Otherwise:
 // Segmentation fault (core dumped)

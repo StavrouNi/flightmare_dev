@@ -1,8 +1,11 @@
+// std
+#include <cstring>
 
 // pybind11
 #include <pybind11/eigen.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/numpy.h>
 
 // flightlib
 #include "flightlib/envs/env_base.hpp"
@@ -32,10 +35,10 @@ PYBIND11_MODULE(flightgym, m) {
     .def("getActDim", &VecEnv<QuadrotorEnv>::getActDim)
     .def("getExtraInfoNames", &VecEnv<QuadrotorEnv>::getExtraInfoNames)
     .def("get_rgb_image",
-        [](VecEnv<QuadrotorEnv> &vec_env, int env_id) {
+        [](VecEnv<QuadrotorEnv> &vec_env, int env_id, int cam_id) {
           int h = 0, w = 0;
           std::vector<uint8_t> buffer;
-          if (!vec_env.getRGBImage(env_id, buffer, h, w)) {
+          if (!vec_env.getRGBImage(env_id, cam_id, buffer, h, w)) {
             throw std::runtime_error("getRGBImage failed in VecEnv");
           }
 
@@ -45,22 +48,19 @@ PYBIND11_MODULE(flightgym, m) {
             throw std::runtime_error("getRGBImage returned invalid size");
           }
 
-          // Allocate NumPy array (H, W, 3) and copy data
           py::array_t<uint8_t> img({h, w, 3});
-          std::memcpy(
-              img.mutable_data(),
-              buffer.data(),
-              buffer.size());
-
+          std::memcpy(img.mutable_data(), buffer.data(), buffer.size());
           return img;
         },
-        py::arg("env_id"))
-    .def("__repr__", [](const VecEnv<QuadrotorEnv>& a) {
+        py::arg("env_id"), py::arg("cam_id") = 0)
+    .def("__repr__", [](const VecEnv<QuadrotorEnv>&) {
       return "RPG Drone Racing Environment";
     });
 
   py::class_<TestEnv<QuadrotorEnv>>(m, "TestEnv_v0")
     .def(py::init<>())
     .def("reset", &TestEnv<QuadrotorEnv>::reset)
-    .def("__repr__", [](const TestEnv<QuadrotorEnv>& a) { return "Test Env"; });
+    .def("__repr__", [](const TestEnv<QuadrotorEnv>&) {
+      return "Test Env";
+    });
 }

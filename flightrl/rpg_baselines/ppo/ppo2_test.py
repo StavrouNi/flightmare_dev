@@ -39,6 +39,7 @@ def test_model(env, model, render=False):
         obs, done, ep_len = env.reset(), False, 0
         while not (done or (ep_len >= max_ep_length)):
             act, _ = model.predict(obs, deterministic=True)
+            print(f"Step {ep_len}, Action: {act}")
             obs, rew, done, infos = env.step(act)
             #
             ep_len += 1

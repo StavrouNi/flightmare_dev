@@ -128,7 +128,15 @@ class FlightEnvVec(VecEnv):
 
     def step_wait(self):
         raise RuntimeError('This method is not implemented')
-
+    
+    def get_rgb_image(self, env_id: int, cam_id: int = 0):
+        """
+        Forward RGB image request to underlying flightgym VecEnv.
+        env_id: which sub-env (0 if you only have one).
+        cam_id: which camera (0 by default).
+        """
+        return self.wrapper.get_rgb_image(env_id, cam_id)
+    
     def get_attr(self, attr_name, indices=None):
         """
         Return attribute from vectorized environment.
