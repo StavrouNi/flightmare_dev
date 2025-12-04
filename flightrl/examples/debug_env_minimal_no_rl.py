@@ -1,4 +1,5 @@
 import os
+import time
 import numpy as np
 import imageio
 from ruamel.yaml import YAML, dump, RoundTripDumper
@@ -20,7 +21,9 @@ def main():
     # 1 env
     env = wrapper.FlightEnvVec(QuadrotorEnv_v1(cfg_str, False))
 
+
     env.connectUnity()
+    time.sleep(2)  # wait for unity to load
     obs = env.reset()
 
     print("Connecting to Unity...")

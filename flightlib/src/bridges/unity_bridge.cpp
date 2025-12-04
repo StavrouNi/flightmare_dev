@@ -117,24 +117,6 @@ bool UnityBridge::getRender(const FrameID frame_id) {
 
   for (size_t idx = 0; idx < pub_msg_.objects.size(); idx++) {
     std::shared_ptr<StaticObject> gate = static_objects_[idx];
-    // Eigen::Vector3f gp = gate->getPosition();
-    // Eigen::Vector3f qp = quad_state.p;  // from previous loop over vehicles
-    // float dist = (gp - qp).norm();
-
-    // logger_.info(
-    //   "[UnityBridge] getRender(frame %d): object %zu pos=(%.2f, %.2f, %.2f)",
-    //   frame_id, idx,
-    //   static_objects_[idx]->getPosition()(0),
-    //   static_objects_[idx]->getPosition()(1),
-    //   static_objects_[idx]->getPosition()(2));
-
-    // logger_.info(
-    //   "[UnityBridge] getRender(frame %d): object %zu pos=(%.2f, %.2f, %.2f), "
-    //   "dist_to_quad=%.2f",
-    //   frame_id, idx,
-    //   gp(0), gp(1), gp(2),
-    //   dist);
-
     pub_msg_.objects[idx].position = positionRos2Unity(gate->getPosition());
     pub_msg_.objects[idx].rotation = quaternionRos2Unity(gate->getQuaternion());
   }

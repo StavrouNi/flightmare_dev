@@ -83,7 +83,9 @@ class QuadrotorEnv final : public EnvBase {
 
   // Define reward for training
   Scalar pos_coeff_, ori_coeff_, lin_vel_coeff_, ang_vel_coeff_, act_coeff_;
-
+  
+  Eigen::Vector3d init_pos_{0.0, 0.0, 2.5};
+  
   // observations and actions (for RL)
   Vector<quadenv::kNObs> quad_obs_;
   Vector<quadenv::kNAct> quad_act_;

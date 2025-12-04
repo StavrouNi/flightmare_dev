@@ -74,6 +74,18 @@ QuadrotorEnv::QuadrotorEnv(const std::string &cfg_path)
 
   // load parameters
   loadParam(cfg_);
+
+  QuadState initial_state;
+  initial_state.setZero();
+  
+  // Use the position we just loaded from YAML
+  initial_state.p = init_pos_.cast<Scalar>(); 
+  
+  // Ensure rotation is identity (flat)
+  initial_state.q() = Quaternion(1.0, 0.0, 0.0, 0.0);
+
+  // Apply it to the internal physics object
+  quadrotor_ptr_->reset(initial_state);
 }
 
 QuadrotorEnv::~QuadrotorEnv() {}
@@ -82,39 +94,99 @@ bool QuadrotorEnv::reset(Ref<Vector<>> obs, const bool random) {
   quad_state_.setZero();
   quad_act_.setZero();
 
+  // 1. First, set the drone to the safe center point (read from YAML)
+  quad_state_.p = init_pos_.cast<Scalar>(); 
+
   if (random) {
-    // randomly reset the quadrotor state
-    // reset position
-    quad_state_.x(QS::POSX) = uniform_dist_(random_gen_);
-    quad_state_.x(QS::POSY) = uniform_dist_(random_gen_);
-    quad_state_.x(QS::POSZ) = uniform_dist_(random_gen_) + 5;
-    if (quad_state_.x(QS::POSZ) < -0.0)
-      quad_state_.x(QS::POSZ) = -quad_state_.x(QS::POSZ);
-    // reset linear velocity
-    quad_state_.x(QS::VELX) = uniform_dist_(random_gen_);
-    quad_state_.x(QS::VELY) = uniform_dist_(random_gen_);
-    quad_state_.x(QS::VELZ) = uniform_dist_(random_gen_);
-    // reset orientation
-    quad_state_.x(QS::ATTW) = uniform_dist_(random_gen_);
-    quad_state_.x(QS::ATTX) = uniform_dist_(random_gen_);
-    quad_state_.x(QS::ATTY) = uniform_dist_(random_gen_);
-    quad_state_.x(QS::ATTZ) = uniform_dist_(random_gen_);
-    quad_state_.qx /= quad_state_.qx.norm();
+    // -----------------------------------------------------------------------
+    // "NOISY BOX"  INITIALIZATION LOGIC
+    // -----------------------------------------------------------------------
+    
+    // A. Define the Box Size (The "Start Zone")
+    // This creates a box: 2m long (X), 2m wide (Y), 1m tall (Z)
+    Scalar box_x_width = 2.0; 
+    Scalar box_y_width = 2.0;
+    Scalar box_z_width = 1.0;
+
+    // B. Create a local random distribution [-0.5, 0.5]
+    // scale the box width.
+    std::uniform_real_distribution<Scalar> dist(-0.5, 0.5);
+
+    // C. Apply Position Noise
+    quad_state_.x(QS::POSX) += dist(random_gen_) * box_x_width;
+    quad_state_.x(QS::POSY) += dist(random_gen_) * box_y_width;
+    quad_state_.x(QS::POSZ) += dist(random_gen_) * box_z_width;
+
+    // Safety check: Don't let noise push it into the floor
+    if (quad_state_.x(QS::POSZ) < 0.1) {
+        quad_state_.x(QS::POSZ) = 0.5; // Force minimum height
+    }
+
+    // D. Apply Yaw (Rotation) Noise
+    // Let the drone face roughly forward, but +/- 30 degrees (approx 0.5 radians)
+    Scalar yaw_amplitude = 30.0 * M_PI / 180.0; 
+    Scalar random_yaw = dist(random_gen_) * 2.0 * yaw_amplitude; // dist gives -0.5 to 0.5, so *2 gives -1 to 1
+
+    // Convert Yaw to Quaternion
+    // formula: q = [cos(yaw/2), 0, 0, sin(yaw/2)] for pure Z-rotation
+    quad_state_.q() = Quaternion(std::cos(0.5 * random_yaw), 0.0, 0.0, std::sin(0.5 * random_yaw));
+
+
+
   } else {
-    // Non-random reset: spawn at safe height above ground to avoid collisions
-    quad_state_.x(QS::POSZ) = 2.5;  // Start at 2.5m height
+    // Non-random: Perfect, stable hover at the init position
+    // Reset orientation to Identity (facing forward, flat)
+    quad_state_.q() = Quaternion(1.0, 0.0, 0.0, 0.0);
   }
-  // reset quadrotor with random states
+
+  // Apply this calculated state to the dynamics simulator
   quadrotor_ptr_->reset(quad_state_);
 
-  // reset control command
+  // Reset control commands
   cmd_.t = 0.0;
   cmd_.thrusts.setZero();
 
-  // obtain observations
+  // Obtain observations and return
   getObs(obs);
   return true;
 }
+// bool QuadrotorEnv::reset(Ref<Vector<>> obs, const bool random) {
+//   quad_state_.setZero();
+//   quad_act_.setZero();
+
+//   if (random) {
+//     // randomly reset the quadrotor state
+//     // reset position
+//     quad_state_.x(QS::POSX) = uniform_dist_(random_gen_);
+//     quad_state_.x(QS::POSY) = uniform_dist_(random_gen_);
+//     quad_state_.x(QS::POSZ) = uniform_dist_(random_gen_) + 5;
+//     if (quad_state_.x(QS::POSZ) < -0.0)
+//       quad_state_.x(QS::POSZ) = -quad_state_.x(QS::POSZ);
+//     // reset linear velocity
+//     quad_state_.x(QS::VELX) = uniform_dist_(random_gen_);
+//     quad_state_.x(QS::VELY) = uniform_dist_(random_gen_);
+//     quad_state_.x(QS::VELZ) = uniform_dist_(random_gen_);
+//     // reset orientation
+//     quad_state_.x(QS::ATTW) = uniform_dist_(random_gen_);
+//     quad_state_.x(QS::ATTX) = uniform_dist_(random_gen_);
+//     quad_state_.x(QS::ATTY) = uniform_dist_(random_gen_);
+//     quad_state_.x(QS::ATTZ) = uniform_dist_(random_gen_);
+//     quad_state_.qx /= quad_state_.qx.norm();
+//   } else {
+//     // Non-random reset: spawn at safe height above ground to avoid collisions
+//     quad_state_.x(QS::POSZ) = 2.5;  // Start at 2.5m height
+//   }
+//   // reset quadrotor with random states
+//   quadrotor_ptr_->reset(quad_state_);
+
+//   // reset control command
+//   cmd_.t = 0.0;
+//   cmd_.thrusts.setZero();
+
+//   // obtain observations
+//   getObs(obs);
+//   return true;
+// }
 
 bool QuadrotorEnv::getObs(Ref<Vector<>> obs) {
   quadrotor_ptr_->getState(&quad_state_);
@@ -191,7 +263,13 @@ bool QuadrotorEnv::loadParam(const YAML::Node &cfg) {
   } else {
     return false;
   }
-
+  if (cfg["quadrotor_env"]["init_pos"]) {
+        std::vector<Scalar> pos = cfg["quadrotor_env"]["init_pos"].as<std::vector<Scalar>>();
+        init_pos_ << pos[0], pos[1], pos[2];
+      } else {
+        logger_.warn("No init_pos in YAML, using default [0,0,2.5]");
+        init_pos_ << 0.0, 0.0, 2.5;
+      }
   if (cfg["rl"]) {
     // load reinforcement learning related parameters
     pos_coeff_ = cfg["rl"]["pos_coeff"].as<Scalar>();
