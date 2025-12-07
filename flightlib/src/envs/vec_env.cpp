@@ -1,4 +1,5 @@
 #include "flightlib/envs/vec_env.hpp"
+#include <chrono> 
 
 namespace flightlib {
 
@@ -100,7 +101,21 @@ bool VecEnv<EnvBase>::step(Ref<MatrixRowMajor<>> act, Ref<MatrixRowMajor<>> obs,
 
   if (unity_render_ && unity_ready_) {
     unity_bridge_ptr_->getRender(0);
+    
+
+    // std::cout << "[C++] Calling handleOutput() (WAITING for Unity)..." << std::endl;
+    
+    auto t_start = std::chrono::high_resolution_clock::now();
+    
     unity_bridge_ptr_->handleOutput();
+    
+    auto t_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = t_end - t_start;
+    
+    if (elapsed.count() > 0.1) {
+        std::cout << "[C++] WARNING: Unity took " << elapsed.count() << "s to reply!" << std::endl;
+    }
+
   }
   return true;
 }

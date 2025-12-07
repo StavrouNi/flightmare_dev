@@ -47,30 +47,33 @@ QuadrotorEnv::QuadrotorEnv(const std::string &cfg_path)
   Vector<3> B_r_BC(0.0, 0.0, 0.3);
   Matrix<3, 3> R_BC = Quaternion(1.0, 0.0, 0.0, 0.0).toRotationMatrix();
   rgb_cam->setFOV(90);
-  rgb_cam->setWidth(720);
-  rgb_cam->setHeight(480);
+  rgb_cam->setWidth(84);
+  rgb_cam->setHeight(84);
   rgb_cam->setRelPose(B_r_BC, R_BC);
   rgb_cam->setPostProcesscing(std::vector<bool>{false, false, false});
   quadrotor_ptr_->addRGBCamera(rgb_cam);
   rgb_cameras_.push_back(rgb_cam);
+  // --- camera end ---
 
   // --- gates ---
-  std::string prefab_id = "rpg_gate";
-
-  auto gate_1 = std::make_shared<StaticGate>("unity_gate_1", prefab_id);
-  gate_1->setPosition(Eigen::Vector3f(-10.0f, 10.0f, 2.5f));
-  Scalar gate_yaw = M_PI;
-  gate_1->setQuaternion(
-    Quaternion(std::cos(0.5 * gate_yaw), 0.0, 0.0, std::sin(0.5 * gate_yaw)));
-
-  auto gate_2 = std::make_shared<StaticGate>("unity_gate_2", prefab_id);
-  gate_2->setPosition(Eigen::Vector3f(0.0f, 10.0f, 2.5f));
-  gate_2->setQuaternion(
-    Quaternion(std::cos(0.5 * gate_yaw), 0.0, 0.0, std::sin(0.5 * gate_yaw)));
-
   gates_.clear();
-  gates_.push_back(gate_1);
-  gates_.push_back(gate_2);
+    std::string prefab_id = "rpg_gate"; 
+
+    if (cfg_["quadrotor_env"]["gates"]) {
+      const YAML::Node& gate_list = cfg_["quadrotor_env"]["gates"];
+      for (size_t i = 0; i < gate_list.size(); i++) {
+        std::vector<Scalar> pos = gate_list[i]["pos"].as<std::vector<Scalar>>();
+        Scalar yaw = gate_list[i]["yaw"].as<Scalar>();
+        
+        std::string gate_name = "unity_gate_" + std::to_string(i);
+        auto gate = std::make_shared<StaticGate>(gate_name, prefab_id);
+        
+        gate->setPosition(Eigen::Vector3f((float)pos[0], (float)pos[1], (float)pos[2]));
+        gate->setQuaternion(Quaternion(std::cos(0.5 * yaw), 0.0, 0.0, std::sin(0.5 * yaw)));
+        gates_.push_back(gate);
+      }
+    }
+  // --- gates end---
 
   // load parameters
   loadParam(cfg_);

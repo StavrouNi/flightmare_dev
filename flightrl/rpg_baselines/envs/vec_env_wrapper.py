@@ -1,3 +1,4 @@
+import time
 import numpy as np
 from gym import spaces
 from stable_baselines.common.vec_env import VecEnv
@@ -9,7 +10,6 @@ class FlightEnvVec(VecEnv):
         self.wrapper = impl
         self.num_obs = self.wrapper.getObsDim()
         self.num_acts = self.wrapper.getActDim()
-        print(self.num_obs, self.num_acts)
         self._observation_space = spaces.Box(
             np.ones(self.num_obs) * -np.Inf,
             np.ones(self.num_obs) * np.Inf, dtype=np.float32)
@@ -26,7 +26,7 @@ class FlightEnvVec(VecEnv):
                                     len(self._extraInfoNames)], dtype=np.float32)
         self.rewards = [[] for _ in range(self.num_envs)]
 
-        self.max_episode_steps = 300
+        self.max_episode_steps = 3000
 
     def seed(self, seed=0):
         self.wrapper.setSeed(seed)
@@ -34,14 +34,13 @@ class FlightEnvVec(VecEnv):
     def step(self, action):
         self.wrapper.step(action, self._observation,
                           self._reward, self._done, self._extraInfo)
-
+        # print(f"[VecEnv] wrapper stepped Step called with action: {action}")
         if len(self._extraInfoNames) is not 0:
             info = [{'extra_info': {
                 self._extraInfoNames[j]: self._extraInfo[i, j] for j in range(0, len(self._extraInfoNames))
             }} for i in range(self.num_envs)]
         else:
             info = [{} for i in range(self.num_envs)]
-
         for i in range(self.num_envs):
             self.rewards[i].append(self._reward[i])
             if self._done[i]:

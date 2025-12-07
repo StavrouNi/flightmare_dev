@@ -29,7 +29,7 @@ def main():
     print("Connecting to Unity...")
     os.makedirs("frames", exist_ok=True)
 
-    n_steps = 250
+    n_steps = 300
     save_every = 10
     ramp_up_steps = 30  # gradual thrust increase
 
@@ -44,9 +44,9 @@ def main():
     #
     # For roll left: increase motors 0,1, decrease motors 2,3
     hover = np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32)
-    roll_left = np.array([0.25, 0.25, -0.25, -0.25], dtype=np.float32)
-    
-    base_action = hover + roll_left  # combined command
+    # roll_left = np.array([0.25, 0.25, -0.25, -0.25], dtype=np.float32)
+    yaw_spin = np.array([-0.15, 0.15, -0.15, 0.15], dtype=np.float32)
+    base_action = hover + yaw_spin  # combined command
 
     last_pos = None
     print("Starting flight with gradual motor ramp-up...")

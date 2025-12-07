@@ -3,4 +3,5 @@ env:
   scene_id: 1 # 0 industrial, 1 warehouse, 2+ other scenes
   num_envs: 1
   num_threads: 1
-  render: yes  # no = headless (no Unity window), camera still works
+  render: yes  # no = headless mode
+  pointcloud: no

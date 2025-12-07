@@ -67,7 +67,7 @@ int runSpawnGatesMinimal() {
   // We'll translate it forward along X and add a slow yaw oscillation.
   double t = 0.0;
   const double dt_loop = 0.05;  // 50 ms per loop
-  const double forward_speed = 1.0;  // m/s along X
+  const double forward_speed = 0.0;  // m/s along X
   const double yaw_amp = 0.6;  // radians amplitude for yaw oscillation
   
   // Image saving parameters

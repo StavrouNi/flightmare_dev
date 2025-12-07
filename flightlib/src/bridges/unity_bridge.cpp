@@ -22,11 +22,12 @@ bool UnityBridge::initializeConnections() {
   // create and bind an upload socket
   pub_.set(zmqpp::socket_option::send_high_water_mark, 6);
   pub_.bind(client_address_ + ":" + pub_port_);
-
   // create and bind a download_socket
   sub_.set(zmqpp::socket_option::receive_high_water_mark, 6);
   sub_.bind(client_address_ + ":" + sub_port_);
 
+  // sub_.set(zmqpp::socket_option::receive_timeout, 10000);
+  sub_.set(zmqpp::socket_option::linger, 0);
   // subscribe all messages from ZMQ
   sub_.subscribe("");
 
@@ -138,7 +139,6 @@ bool UnityBridge::setScene(const SceneID& scene_id) {
     logger_.warn("Scene ID is not defined, cannot set scene.");
     return false;
   }
-  // logger_.info("Scene ID is set to %d.", scene_id);
   settings_.scene_id = scene_id;
   return true;
 }
@@ -201,10 +201,41 @@ bool UnityBridge::addStaticObject(std::shared_ptr<StaticObject> static_object) {
 }
 
 bool UnityBridge::handleOutput() {
+
+  zmqpp::poller poller;
+  poller.add(sub_);
   // create new message 
   zmqpp::message msg;
-  sub_.receive(msg);
-  // unpack message metadata
+  
+  // Poll with 10 second timeout (10000 milliseconds)
+  if (poller.poll(10000)) {
+    // Event detected: Data is ready in the buffer.
+    // We can now safely call receive() knowing it will not block.
+    sub_.receive(msg);
+  } else {
+    // Timeout detected: No data received for 10 seconds.
+    std::cerr << "[Bridge] ERROR: ZMQ Receive Timeout (10s) - Unity Renderer is unresponsive." << std::endl;
+    // unity_ready_ = false; / What do we gain?
+    return false;
+  }
+  // receive() blocks until data arrives OR timeout (10s from line 30)
+  // Returns false only if timeout expires with no data
+  // bool received = sub_.receive(msg);
+  
+  // if (!received) {
+  //   std::cerr << "[Bridge] ERROR: ZMQ receive timeout (10s) - Unity may have crashed or frozen!" << std::endl;
+  //   unity_ready_ = false;
+  //   return false;
+  // }
+  
+  // std::cout << "[Bridge] ZMQ Received! msg.parts()=" << msg.parts() << std::endl;
+  
+  if (msg.parts() == 0) {
+      std::cerr << "[Bridge] WARNING: Received empty message" << std::endl;
+      return false;
+  }
+  // --- ADD LOG 2 ---
+  // std::cout << "[Bridge] ZMQ Received! Processing..." << std::endl;  // unpack message metadata
   std::string json_sub_msg = msg.get(0);
   // parse metadata
   SubMessage_t sub_msg = json::parse(json_sub_msg);

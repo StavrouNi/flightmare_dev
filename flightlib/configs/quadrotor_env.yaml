@@ -4,6 +4,40 @@ quadrotor_env:
    max_t: 5.0
    add_camera: yes
    init_pos: [-10.0, 0.0, 2.5]  # initial position of the quadrotor (x, y, z)
+   gates:
+      # --- CENTER SPINE (Start) ---
+      # 1. The Low Center Gate (Fly straight through)
+      - pos: [0.0, 0.0, 2.5]
+        yaw: 0.0  # Face Forward
+
+      # --- RIGHT WING ---
+      # 2. Front Right Corner (Bank Right)
+      - pos: [8.0, 4.0, 2.5]
+        yaw: 0.78 # 45 deg
+
+      # 3. Back Right Corner (Sharp Turn Back)
+      - pos: [8.0, -4.0, 2.5]
+        yaw: 2.35 # 135 deg
+
+      # --- CROSSING ---
+      # 4. The "Needle" (Crossing back through center, slightly higher)
+      - pos: [0.0, 0.0, 4.0]
+        yaw: 3.14 # 180 deg (Flying backwards relative to start)
+
+      # --- LEFT WING ---
+      # 5. Front Left Corner (Bank Left)
+      - pos: [-8.0, 4.0, 2.5]
+        yaw: 2.35 # 135 deg (Mirror of Gate 3)
+
+      # 6. Back Left Corner (Sharp Turn Back)
+      - pos: [-8.0, -4.0, 2.5]
+        yaw: 0.78 # 45 deg (Mirror of Gate 2)
+
+      # --- THE FINISHER (Split-S) ---
+      # 7. The High Dive (Above Gate 1)
+      - pos: [-2.0, 0.0, 6.0] 
+        yaw: 0.0 # Face Forward, get ready to dive to Gate 1
+
 
 quadrotor_dynamics:
   mass: 0.73
