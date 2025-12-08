@@ -26,7 +26,9 @@ bool UnityBridge::initializeConnections() {
   sub_.set(zmqpp::socket_option::receive_high_water_mark, 6);
   sub_.bind(client_address_ + ":" + sub_port_);
 
-  // sub_.set(zmqpp::socket_option::receive_timeout, 10000);
+  sub_.set(zmqpp::socket_option::conflate, 1);
+  sub_.set(zmqpp::socket_option::receive_timeout, 5000);
+
   sub_.set(zmqpp::socket_option::linger, 0);
   // subscribe all messages from ZMQ
   sub_.subscribe("");
@@ -201,110 +203,92 @@ bool UnityBridge::addStaticObject(std::shared_ptr<StaticObject> static_object) {
 }
 
 bool UnityBridge::handleOutput() {
-
   zmqpp::poller poller;
   poller.add(sub_);
-  // create new message 
   zmqpp::message msg;
-  
-  // Poll with 10 second timeout (10000 milliseconds)
-  if (poller.poll(10000)) {
-    // Event detected: Data is ready in the buffer.
-    // We can now safely call receive() knowing it will not block.
-    sub_.receive(msg);
-  } else {
-    // Timeout detected: No data received for 10 seconds.
-    std::cerr << "[Bridge] ERROR: ZMQ Receive Timeout (10s) - Unity Renderer is unresponsive." << std::endl;
-    // unity_ready_ = false; / What do we gain?
-    return false;
-  }
-  // receive() blocks until data arrives OR timeout (10s from line 30)
-  // Returns false only if timeout expires with no data
-  // bool received = sub_.receive(msg);
-  
-  // if (!received) {
-  //   std::cerr << "[Bridge] ERROR: ZMQ receive timeout (10s) - Unity may have crashed or frozen!" << std::endl;
-  //   unity_ready_ = false;
-  //   return false;
-  // }
-  
-  // std::cout << "[Bridge] ZMQ Received! msg.parts()=" << msg.parts() << std::endl;
-  
-  if (msg.parts() == 0) {
-      std::cerr << "[Bridge] WARNING: Received empty message" << std::endl;
-      return false;
-  }
-  // --- ADD LOG 2 ---
-  // std::cout << "[Bridge] ZMQ Received! Processing..." << std::endl;  // unpack message metadata
-  std::string json_sub_msg = msg.get(0);
-  // parse metadata
-  SubMessage_t sub_msg = json::parse(json_sub_msg);
 
-  size_t image_i = 1;
-  // ensureBufferIsAllocated(sub_msg);
-  for (size_t idx = 0; idx < settings_.vehicles.size(); idx++) {
-    // update vehicle collision flag
-    unity_quadrotors_[idx]->setCollision(sub_msg.sub_vehicles[idx].collision);
+  // We have a poller listening for unity frames so we can "Wake Up" Unity before its 5s watchdog kills the scene.
+  const int max_retries = 20;
+  const int poll_timeout_ms = 250; 
 
-    // feed image data to RGB camera
-    for (const auto& cam : settings_.vehicles[idx].cameras) {
-      for (size_t layer_idx = 0; layer_idx <= cam.enabled_layers.size();
-           layer_idx++) {
-        if (!layer_idx == 0 && !cam.enabled_layers[layer_idx - 1]) continue;
+  for (int retry = 0; retry < max_retries; retry++) {
 
-        if (layer_idx == 1) {
-          // depth
-          uint32_t image_len = cam.width * cam.height * 4;
-          // Get raw image bytes from ZMQ message.
-          // WARNING: This is a zero-copy operation that also casts the input to
-          // an array of unit8_t. when the message is deleted, this pointer is
-          // also dereferenced.
-          const uint8_t* image_data;
-          msg.get(image_data, image_i);
-          image_i = image_i + 1;
-          // Pack image into cv::Mat
-          cv::Mat new_image = cv::Mat(cam.height, cam.width, CV_32FC1);
-          memcpy(new_image.data, image_data, image_len);
-          // Flip image since OpenCV origin is upper left, but Unity's is lower
-          // left.
-          new_image = new_image * (100.f);
-          cv::flip(new_image, new_image, 0);
-
-
-          unity_quadrotors_[idx]
-            ->getCameras()[cam.output_index]
-            ->feedImageQueue(layer_idx, new_image);
-
-
-        } else {
-          uint32_t image_len = cam.width * cam.height * cam.channels;
-          // Get raw image bytes from ZMQ message.
-          // WARNING: This is a zero-copy operation that also casts the input to
-          // an array of unit8_t. when the message is deleted, this pointer is
-          // also dereferenced.
-          const uint8_t* image_data;
-          msg.get(image_data, image_i);
-          image_i = image_i + 1;
-          // Pack image into cv::Mat
-          cv::Mat new_image =
-            cv::Mat(cam.height, cam.width, CV_MAKETYPE(CV_8U, cam.channels));
-          memcpy(new_image.data, image_data, image_len);
-          // Flip image since OpenCV origin is upper left, but Unity's is lower
-          // left.
-          cv::flip(new_image, new_image, 0);
-
-          // Tell OpenCv that the input is RGB.
-          if (cam.channels == 3) {
-            cv::cvtColor(new_image, new_image, CV_RGB2BGR);
+    if (poller.poll(poll_timeout_ms)) {
+      
+      if (sub_.receive(msg, true)) {
+          
+          if (msg.parts() == 0) {
+              std::cerr << "[Bridge] WARNING: Received empty message" << std::endl;
+              return false;
           }
-          unity_quadrotors_[idx]
-            ->getCameras()[cam.output_index]
-            ->feedImageQueue(layer_idx, new_image);
-        }
+
+          std::string json_sub_msg = msg.get(0);
+          SubMessage_t sub_msg = json::parse(json_sub_msg);
+          size_t image_i = 1;
+
+          for (size_t idx = 0; idx < settings_.vehicles.size(); idx++) {
+            if (idx >= sub_msg.sub_vehicles.size()) break; 
+            
+            unity_quadrotors_[idx]->setCollision(sub_msg.sub_vehicles[idx].collision);
+
+            for (const auto& cam : settings_.vehicles[idx].cameras) {
+              for (size_t layer_idx = 0; layer_idx <= cam.enabled_layers.size(); layer_idx++) {
+                if (!layer_idx == 0 && !cam.enabled_layers[layer_idx - 1]) continue;
+
+                // --- Depth Processing ---
+                if (layer_idx == 1) {
+                  uint32_t image_len = cam.width * cam.height * 4;
+                  const uint8_t* image_data;
+                  // Safety check for multipart
+                  if (image_i >= msg.parts()) break; 
+                  msg.get(image_data, image_i);
+                  image_i++;
+
+                  cv::Mat new_image = cv::Mat(cam.height, cam.width, CV_32FC1);
+                  memcpy(new_image.data, image_data, image_len);
+                  new_image = new_image * (100.f);
+                  cv::flip(new_image, new_image, 0);
+
+                  unity_quadrotors_[idx]->getCameras()[cam.output_index]->feedImageQueue(layer_idx, new_image);
+                } 
+                // --- RGB Processing ---
+                else {
+                  uint32_t image_len = cam.width * cam.height * cam.channels;
+                  const uint8_t* image_data;
+                  if (image_i >= msg.parts()) break;
+                  msg.get(image_data, image_i);
+                  image_i++;
+
+                  cv::Mat new_image = cv::Mat(cam.height, cam.width, CV_MAKETYPE(CV_8U, cam.channels));
+                  memcpy(new_image.data, image_data, image_len);
+                  cv::flip(new_image, new_image, 0);
+
+                  if (cam.channels == 3) {
+                    cv::cvtColor(new_image, new_image, CV_RGB2BGR);
+                  }
+                  unity_quadrotors_[idx]->getCameras()[cam.output_index]->feedImageQueue(layer_idx, new_image);
+                }
+              }
+            }
+          }
+          // ----------------------------------------
+          
+          return true; 
       }
     }
+
+    std::cout << "[Bridge] Lag detected (Attempt " << retry + 1 << "/" << max_retries 
+              << "). Resending Pose to reset Unity Watchdog..." << std::endl;
+
+    // RESEND the last known pose. 
+    // This sends traffic to Unity so it knows we are still alive.
+    // It prevents Unity from triggering "SceneManager.LoadScene()".
+    this->getRender(pub_msg_.frame_id); 
   }
-  return true;
+
+  //  FAILURE
+  std::cerr << "[Bridge] ERROR: Unity unresponsive for 5+ seconds. It likely crashed or reloaded." << std::endl;
+  return false;
 }
 
 bool UnityBridge::getPointCloud(PointCloudMessage_t& pointcloud_msg,

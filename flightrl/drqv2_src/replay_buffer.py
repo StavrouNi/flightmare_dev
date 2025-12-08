@@ -7,7 +7,7 @@ class ReplayBuffer:
         self.batch_size = batch_size
         self.device = device
 
-        # Preallocate memory for speed
+        # Preallocate memory 
         # obs_dtype = np.uint8 (Images 0-255)
         self.obses = np.empty((capacity, *obs_shape), dtype=np.uint8)
         self.next_obses = np.empty((capacity, *obs_shape), dtype=np.uint8)

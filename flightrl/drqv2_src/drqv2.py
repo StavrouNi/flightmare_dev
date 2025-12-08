@@ -218,3 +218,28 @@ class DrQV2Agent:
         if step % self.update_every_steps == 0:
             for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
                 target_param.data.copy_(self.critic_target_tau * param.data + (1 - self.critic_target_tau) * target_param.data)
+
+    def save(self, filepath):
+        """Saves all internal networks and optimizers."""
+        torch.save({
+            'encoder': self.encoder.state_dict(),
+            'actor': self.actor.state_dict(),
+            'critic': self.critic.state_dict(),
+            'critic_target': self.critic_target.state_dict(),
+            'encoder_opt': self.encoder_opt.state_dict(),
+            'actor_opt': self.actor_opt.state_dict(),
+            'critic_opt': self.critic_opt.state_dict()
+        }, filepath)
+
+    def load(self, filepath):
+        """Loads all internal networks and optimizers."""
+        checkpoint = torch.load(filepath, map_location=self.device)
+        
+        self.encoder.load_state_dict(checkpoint['encoder'])
+        self.actor.load_state_dict(checkpoint['actor'])
+        self.critic.load_state_dict(checkpoint['critic'])
+        self.critic_target.load_state_dict(checkpoint['critic_target'])
+        
+        self.encoder_opt.load_state_dict(checkpoint['encoder_opt'])
+        self.actor_opt.load_state_dict(checkpoint['actor_opt'])
+        self.critic_opt.load_state_dict(checkpoint['critic_opt'])

@@ -1,22 +1,16 @@
 import os
-import time
-import ctypes
-try:
-    ctypes.cdll.LoadLibrary('/usr/lib/x86_64-linux-gnu/libcuda.so.1')
-except OSError:
-    print("WARNING: Could not manually load libcuda.so.1")
+from torch.utils.tensorboard import SummaryWriter
+from logger_utils import DebugLogger
 import torch
 from ruamel.yaml import YAML
-
-# Import your wrapper
+from tqdm import tqdm
 from wrapper import FlightmareDrQWrapper
-
-# We will create these two files next!
 from drqv2 import DrQV2Agent
 from replay_buffer import ReplayBuffer
 
 def main():
-    # 1. Setup Paths
+
+    # Setup Paths and configs
     fm_path = os.getenv("FLIGHTMARE_PATH")
     if fm_path is None:
         raise RuntimeError("FLIGHTMARE_PATH is not set")
@@ -24,19 +18,24 @@ def main():
     cfg_path = os.path.join(fm_path, "flightlib/configs/vec_env.yaml")
     cfg = YAML().load(open(cfg_path, "r"))
 
-    # 2. Initialize Environment (The "Sandwich")
-    # This loads Unity, Physics, and the Butterfly Track logic
+    # Initialize Environment
+    # This loads Unity, Physics, and the Gate Track logic
     env = FlightmareDrQWrapper(cfg, stack_frames=3)
-    
-    # 3. Setup Hyperparameters
-    # DrQ-v2 standard settings
+
+    # Observability loggers
+    writer = SummaryWriter(log_dir="runs/flight_racing_experiment_1")
+    debugger = DebugLogger(log_dir="debug_plots")
+    debugger.set_gates(env.gate_positions) 
+    print(f"[Main] Debugger loaded {len(env.gate_positions)} gates.")
+
+    # Setup Hyperparameters
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Training on: {device}")
     
     action_shape = env.action_space.shape
     obs_shape = env.observation_space.shape # (9, 84, 84)
     
-    # 4. Initialize Agent (DrQ-v2)
+    # Initialize Agent (DrQ-v2)
     agent = DrQV2Agent(
         obs_shape=obs_shape,
         action_shape=action_shape,
@@ -47,7 +46,7 @@ def main():
         batch_size=256
     )
 
-    # 5. Initialize Replay Buffer (Stores 100k frames)
+    # Initialize Replay Buffer (Stores 100k frames)
     # We store frames in RAM. 100k * 64*64*3 bytes is ~1.2GB. Safe.
     replay_buffer = ReplayBuffer(
         obs_shape=obs_shape,
@@ -57,69 +56,89 @@ def main():
         device=device
     )
 
-    # 6. NOW Connect to Unity (Safe!) 🤝
     print("4. Connecting to Unity...")
     env.connect_and_warmup()
 
     # 7. Training Loop
     print("5. Starting Training Loop!")
-    step = 0
+
+    max_steps = 1_000_000
+    save_interval = 50_000 # 50.000 is good?
+    episode_reward = 0
+    episode_step = 0
     episode = 0
-    max_steps = 1000000 # 1 Million steps for initial trial
     
-    # Start the first episode
+    pbar = tqdm(total=max_steps, desc="Training", unit="step")
+    
     obs = env.reset()
     
-    while step < max_steps:
-        # time.sleep(0.005)
+    for step in range(max_steps):
         
-        # A. Select Action
         # Random exploration for the first 2000 steps to fill buffer
         if step < 2000:
             action = env.action_space.sample()
         else:
-            # Add noise for exploration during training
             with torch.no_grad():
                 action = agent.act(obs, step, eval_mode=False)
 
-        # --- LOG 1: Before Step ---
+        try:
+            next_obs, reward, done, info = env.step(action)
+            if "pos" in info:
+                debugger.log_step(info["pos"])
+        except RuntimeError as e:
+            #### TODO We should not go inside here. This is the last resort. 
+            # No image and other exceptions should be handled inside the wrapper.
+            print(f"[Python] ⚠️ CAUGHT EXCEPTION at Step {step}: {e}")
+            # Just try to reset once.
+            next_obs = env.reset()
+            # Keep the variables valid so the loop doesn't break # TODO What should we give here?
+            reward = 0.0
+            done = True
+            info = {"timeout": True}
 
-        # B. Step Environment
-        print(f"[Train] Step {step}: Taking action {action}")
-        t0 = time.time()
-        next_obs, reward, done, info = env.step(action)
-        dt_step = time.time() - t0
-        
-        # --- LOG 2: Check Step Duration ---
-        if dt_step > 0.001: # Only print if it's suspiciously slow (>100ms)
-            print(f"[Train] Step {step} took {dt_step:.4f}s (Slow!)")
-        # C. Add to Buffer
-        # Note: We don't verify 'done' mask here because racing is continuous
-        # until crash.
+
+        # Add to Buffer
+        # Note: We don't verify 'done' mask here because racing is continuous until crash 
         replay_buffer.add(obs, action, reward, next_obs, done)
         
         obs = next_obs
         step += 1
 
-        # D. Update Agent
+        # Update Agent
         if step >= 200:
             agent.update(replay_buffer, step)
 
-        # E. Logging / Reset
-        if done:
-            print(f"[Train] CRASH/DONE detected at Step {step}. Reward: {reward:.2f}")
+        episode_reward += reward
+        episode_step += 1
+        pbar.update(1) 
 
+        # Logging / Reset
+        if done:
+            # TENSORBOARD LOGGING
+            writer.add_scalar("Train/Episode_Reward", episode_reward, episode)
+            writer.add_scalar("Train/Episode_Length", episode_step, episode)
+            
+            # TRAJECTORY MAPPING (Save image every 20 episodes)
+            if episode % 20 == 0:
+                debugger.save_trajectory(episode, episode_reward)
+                pbar.write(f"📸 Saved trajectory plot for Episode {episode}")
+
+            # Reset
+            debugger.reset()
             obs = env.reset()
-            
             episode += 1
+            episode_reward = 0
+            episode_step = 0
             
-        # Optional: Save weights every 50k steps
-        if step % 50000 == 0:
-            torch.save(agent.state_dict(), f"agent_step_{step}.pt")
-            print(f"Saved weights at step {step}")
+        # Save checkpoint
+        if step > 0 and step % save_interval == 0:
+            save_path = f"agent_step_{step}.pt"
+            agent.save(save_path) 
+            pbar.write(f"✅ Saved weights to {save_path}")
 
     # Done
     env.close()
+    pbar.close()
     print("Training Finished!")
 
 if __name__ == "__main__":

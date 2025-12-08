@@ -4,4 +4,3 @@ env:
   num_envs: 1
   num_threads: 1
   render: yes  # no = headless mode
-  pointcloud: no
