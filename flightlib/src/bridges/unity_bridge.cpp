@@ -118,11 +118,11 @@ bool UnityBridge::getRender(const FrameID frame_id) {
   }
 
 
-  for (size_t idx = 0; idx < pub_msg_.objects.size(); idx++) {
-    std::shared_ptr<StaticObject> gate = static_objects_[idx];
-    pub_msg_.objects[idx].position = positionRos2Unity(gate->getPosition());
-    pub_msg_.objects[idx].rotation = quaternionRos2Unity(gate->getQuaternion());
-  }
+  // for (size_t idx = 0; idx < pub_msg_.objects.size(); idx++) {
+  //   std::shared_ptr<StaticObject> gate = static_objects_[idx];
+  //   pub_msg_.objects[idx].position = positionRos2Unity(gate->getPosition());
+  //   pub_msg_.objects[idx].rotation = quaternionRos2Unity(gate->getQuaternion());
+  // }
 
   // create new message object
   zmqpp::message msg;

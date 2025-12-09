@@ -5,37 +5,44 @@ quadrotor_env:
    init_pos: [-10.0, 0.0, 2.5]  # initial position of the quadrotor (x, y, z)
   # Drone starts at [-10, 0, 2.5] facing Yaw 0 (East)
    gates:
-    # --- THE OVAL (Rotated to match Start) ---
-
-    # 1. First Gate (Straight ahead, 5m away)
+    # ---  CIRCLE ---
     - pos: [-10.0, 3.0, 2.5]
-    # - pos: [-5.0, 0.0, 2.5]
+      yaw: 0.0
+    
+    - pos: [-5.0, 8.0, 2.5]
+      yaw:  1.57
+
+    - pos: [0.0, 3.0, 2.5]
       yaw: 0.0
 
-    # 2. Second Gate (Straight ahead, 10m away - entering turn)
-    - pos: [-5.0, 8.0, 2.5]
-    # - pos: [0.0, 0.0, 2.5]
-      yaw: -0.4 # 20 
+    - pos: [-5.0, -2.0, 2.5]
+      yaw:  1.57
 
-    # 3. Far East Turn (Banking Left)
-    - pos: [3.0, 8.0, 2.5]
-    # - pos: [5.0, 3.0, 2.5]
-      yaw: 0.4 # -20 
+    # --- CUSTOM OVAL  ---
 
-    # 4. Back Straight 
-    - pos: [7.0, 0.0, 2.5]
-    # - pos: [0.0, 6.0, 2.5]
-      yaw: 0.0 #   
-
-    # 5. Return Gate
-    - pos: [3.0, -6.0, 2.5]
-    # - pos: [-5.0, 6.0, 2.5]
-      yaw: -0.4 #  
-
-    # 6. Final Turn (Banking Left to rejoin start)
+    # # 1. First Gate (Straight ahead, 5m away)
     # - pos: [-10.0, 3.0, 2.5]
-    - pos: [-5.0, -6.0, 2.5]
-      yaw: 0.4 #  
+    #   yaw: 0.0
+
+    # # 2. Second Gate (Straight ahead, 10m away - entering turn)
+    # - pos: [-5.0, 8.0, 2.5]
+    #   yaw: -0.4 # 20 
+
+    # # 3. Far East Turn (Banking Left)
+    # - pos: [3.0, 8.0, 2.5]
+    #   yaw: 0.4 # -20 
+
+    # # 4. Back Straight 
+    # - pos: [7.0, 0.0, 2.5]
+    #   yaw: 0.0 #   
+
+    # # 5. Return Gate
+    # - pos: [3.0, -6.0, 2.5]
+    #   yaw: -0.4 #  
+
+    # # 6. Final Turn (Banking Left to rejoin start)
+    # - pos: [-5.0, -6.0, 2.5]
+    #   yaw: 0.4 #  
 
 quadrotor_dynamics:
   mass: 0.73

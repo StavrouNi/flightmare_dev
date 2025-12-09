@@ -36,7 +36,9 @@ QuadrotorEnv::QuadrotorEnv(const std::string &cfg_path)
   // define input and output dimension for the environment
   obs_dim_ = quadenv::kNObs;
   act_dim_ = quadenv::kNAct;
-
+  // set size to 0.5m cube for visualization
+  Vector<3> quad_size(0.5, 0.5, 0.5);
+  quadrotor_ptr_->setSize(quad_size);
   Scalar mass = quadrotor_ptr_->getMass();
   act_mean_ = Vector<quadenv::kNAct>::Ones() * (-mass * Gz) / 4;
   act_std_ = Vector<quadenv::kNAct>::Ones() * (-mass * 2 * Gz) / 4;
@@ -96,7 +98,7 @@ QuadrotorEnv::~QuadrotorEnv() {}
 bool QuadrotorEnv::reset(Ref<Vector<>> obs, const bool random) {
   quad_state_.setZero();
   quad_act_.setZero();
-
+  // quadrotor_ptr_->setCollision(false);
   // 1. First, set the drone to the safe center point (read from YAML)
   quad_state_.p = init_pos_.cast<Scalar>(); 
 
@@ -116,23 +118,23 @@ bool QuadrotorEnv::reset(Ref<Vector<>> obs, const bool random) {
     std::uniform_real_distribution<Scalar> dist(-0.5, 0.5);
 
     // C. Apply Position Noise
-    quad_state_.x(QS::POSX) += dist(random_gen_) * box_x_width;
-    quad_state_.x(QS::POSY) += dist(random_gen_) * box_y_width;
-    quad_state_.x(QS::POSZ) += dist(random_gen_) * box_z_width;
+    // quad_state_.x(QS::POSX) += dist(random_gen_) * box_x_width;
+    // quad_state_.x(QS::POSY) += dist(random_gen_) * box_y_width;
+    // quad_state_.x(QS::POSZ) += dist(random_gen_) * box_z_width;
 
     // Safety check: Don't let noise push it into the floor
-    if (quad_state_.x(QS::POSZ) < 0.1) {
-        quad_state_.x(QS::POSZ) = 0.5; // Force minimum height
-    }
+    // if (quad_state_.x(QS::POSZ) < 0.1) {
+    //     quad_state_.x(QS::POSZ) = 0.5; // Force minimum height
+    // }
 
     // D. Apply Yaw (Rotation) Noise
     // Let the drone face roughly forward, but +/- 30 degrees (approx 0.5 radians)
     Scalar yaw_amplitude = 30.0 * M_PI / 180.0; 
-    Scalar random_yaw = dist(random_gen_) * 2.0 * yaw_amplitude; // dist gives -0.5 to 0.5, so *2 gives -1 to 1
+    // Scalar random_yaw = dist(random_gen_) * 2.0 * yaw_amplitude; // dist gives -0.5 to 0.5, so *2 gives -1 to 1
 
     // Convert Yaw to Quaternion
     // formula: q = [cos(yaw/2), 0, 0, sin(yaw/2)] for pure Z-rotation
-    quad_state_.q() = Quaternion(std::cos(0.5 * random_yaw), 0.0, 0.0, std::sin(0.5 * random_yaw));
+    quad_state_.q() = Quaternion(std::cos(0.5 * yaw_amplitude), 0.0, 0.0, std::sin(0.5 * yaw_amplitude));
 
 
 
@@ -153,43 +155,6 @@ bool QuadrotorEnv::reset(Ref<Vector<>> obs, const bool random) {
   getObs(obs);
   return true;
 }
-// bool QuadrotorEnv::reset(Ref<Vector<>> obs, const bool random) {
-//   quad_state_.setZero();
-//   quad_act_.setZero();
-
-//   if (random) {
-//     // randomly reset the quadrotor state
-//     // reset position
-//     quad_state_.x(QS::POSX) = uniform_dist_(random_gen_);
-//     quad_state_.x(QS::POSY) = uniform_dist_(random_gen_);
-//     quad_state_.x(QS::POSZ) = uniform_dist_(random_gen_) + 5;
-//     if (quad_state_.x(QS::POSZ) < -0.0)
-//       quad_state_.x(QS::POSZ) = -quad_state_.x(QS::POSZ);
-//     // reset linear velocity
-//     quad_state_.x(QS::VELX) = uniform_dist_(random_gen_);
-//     quad_state_.x(QS::VELY) = uniform_dist_(random_gen_);
-//     quad_state_.x(QS::VELZ) = uniform_dist_(random_gen_);
-//     // reset orientation
-//     quad_state_.x(QS::ATTW) = uniform_dist_(random_gen_);
-//     quad_state_.x(QS::ATTX) = uniform_dist_(random_gen_);
-//     quad_state_.x(QS::ATTY) = uniform_dist_(random_gen_);
-//     quad_state_.x(QS::ATTZ) = uniform_dist_(random_gen_);
-//     quad_state_.qx /= quad_state_.qx.norm();
-//   } else {
-//     // Non-random reset: spawn at safe height above ground to avoid collisions
-//     quad_state_.x(QS::POSZ) = 2.5;  // Start at 2.5m height
-//   }
-//   // reset quadrotor with random states
-//   quadrotor_ptr_->reset(quad_state_);
-
-//   // reset control command
-//   cmd_.t = 0.0;
-//   cmd_.thrusts.setZero();
-
-//   // obtain observations
-//   getObs(obs);
-//   return true;
-// }
 
 bool QuadrotorEnv::getObs(Ref<Vector<>> obs) {
   quadrotor_ptr_->getState(&quad_state_);
@@ -251,8 +216,14 @@ Scalar QuadrotorEnv::step(const Ref<Vector<>> act, Ref<Vector<>> obs) {
 }
 
 bool QuadrotorEnv::isTerminalState(Scalar &reward) {
+  // if (quadrotor_ptr_->getCollision()) {
+  //     logger_.info("Quadrotor collided!");
+  //     reward = -4.0; 
+  //     return true;    
+  // }
   if (quad_state_.x(QS::POSZ) <= 0.02) {
-    reward = -0.02;
+    logger_.info("Quadrotor crashed to the ground!");
+    reward = -4.0;
     return true;
   }
   reward = 0.0;

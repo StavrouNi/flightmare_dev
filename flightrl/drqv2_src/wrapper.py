@@ -9,6 +9,8 @@ import cv2
 from flightgym import QuadrotorEnv_v1
 from rpg_baselines.envs import vec_env_wrapper as wrapper
 
+CRASH_PENALTY = -4.0
+
 class FlightmareDrQWrapper(gym.Env):
     def __init__(self, cfg, stack_frames=3):
         """
@@ -34,9 +36,10 @@ class FlightmareDrQWrapper(gym.Env):
         self.observation_space = gym.spaces.Box(0, 255, shape=(self.channels, 84, 84), dtype=np.uint8)
         self.frame_buffer = deque(maxlen=stack_frames)
         self.current_gate_idx = 0
-        self.gate_radius = 0.5 
+        self.gate_radius = 0.75  # Meters ??
         self.prev_dist = 0.0
 
+        self.current_step = 0  # For debugging
     def connect_and_warmup(self):
             """Connects to Unity only when we are actually ready."""
             print("[Wrapper] Connecting to Unity now...")
@@ -117,22 +120,38 @@ class FlightmareDrQWrapper(gym.Env):
     def step(self, action):
         # Step Physics
         action_vec = np.expand_dims(action, axis=0) 
-        obs_state, _, _, info = self.env.step(action_vec)
-        
+        obs_state, raw_rewards, cpp_done, info = self.env.step(action_vec)
+        cpp_crash = cpp_done[0]
+        # Log the critical output before Python processes it
+        # Assuming full_state = obs_state[0] is already extracted
+        full_state = obs_state[0] 
+        V_linear = full_state[6:9]
+        linear_speed = np.linalg.norm(V_linear)
+        roll_angle = full_state[5]  # Index 5 (Rad)
+        pitch_angle = full_state[4] # Index 4 (Rad)
+
+        # --- Add to the existing print block ---
+        print(f"--- DEBUG STEP {self.current_step} ---")
+        x_pos = full_state[0]
+        y_pos = full_state[1]
+        z_pos = full_state[2]
+
+        print(f"drone full STATE: X={x_pos:.4f}, Y={y_pos:.4f}, Z={z_pos:.4f} ...")
+        print(f"SPEED: {linear_speed:.2f} m/s")
+        print(f"ROLL/PITCH: {roll_angle:.2f} / {pitch_angle:.2f} rad")
+        print(f"RAW C++ DONE: {cpp_done[0]}")
+        print(f"RAW C++ REWARD: {raw_rewards[0]:.4f}")
+        # ---------------------------------------
+        self.current_step += 1 # DEBUGGING
         # Reward
-        drone_pos = obs_state[0, 0:3]
-        reward = self._compute_racing_reward(drone_pos, action)
+        full_state = obs_state[0]
+        reward, done = self._compute_racing_reward(full_state, action, cpp_crash)
         # Update Visuals
         img = self._get_image_obs()
         self.frame_buffer.append(img)
-        
-        # Check Crash (Floor/Ceiling/Bounds)
-        done = False
-        if (drone_pos[2] < 0.2 or drone_pos[2] > 8.0 or 
-            np.abs(drone_pos[0]) > 20.0 or np.abs(drone_pos[1]) > 20.0):
-            done = True
-            reward += -10.0
 
+        drone_pos = obs_state[0, 0:3]
+    
         info = {
             "pos": drone_pos, 
             "gate_idx": self.current_gate_idx,
@@ -152,14 +171,26 @@ class FlightmareDrQWrapper(gym.Env):
     def _get_stacked_obs(self):
         return np.concatenate(list(self.frame_buffer), axis=0)
 
-    def _compute_racing_reward(self, drone_pos, action):
+    def _compute_racing_reward(self, full_state, action, cpp_done):
+
+        drone_pos = full_state[0:3]
+        body_rates = full_state[9:12]
+        if cpp_done:
+            target_pos = self.gate_positions[self.current_gate_idx]
+            self.prev_dist = np.linalg.norm(drone_pos - target_pos)
+            return CRASH_PENALTY, True
+        
         target_pos = self.gate_positions[self.current_gate_idx]
         curr_dist = np.linalg.norm(drone_pos - target_pos)
-        
+        print(f"Distance to Gate {self.current_gate_idx}: {curr_dist:.4f} m")
         # Progress Reward
         progress = (self.prev_dist - curr_dist)
-        action_penalty = 0.01 * np.linalg.norm(action)
-        reward = 10.0 * progress - action_penalty
+
+        # Large Body rates action penalty
+        high_body_rates_penalty = 0.01 * np.linalg.norm(body_rates)
+
+        # Reward
+        reward = 1.0 * progress - high_body_rates_penalty
         
         self.prev_dist = curr_dist
         
@@ -176,4 +207,12 @@ class FlightmareDrQWrapper(gym.Env):
             new_target = self.gate_positions[self.current_gate_idx]
             self.prev_dist = np.linalg.norm(drone_pos - new_target)
             
-        return reward
+            
+        # 4. Python-Side Bounds Check (Ceiling/Walls)
+        # We can still check ceiling here since C++ might only check floor
+        if (drone_pos[2] > 8.0 or 
+            np.abs(drone_pos[0]) > 20.0 or np.abs(drone_pos[1]) > 20.0):
+            return CRASH_PENALTY, True
+
+        return reward, False
+            

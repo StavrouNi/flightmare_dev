@@ -41,7 +41,6 @@ class Quadrotor : ObjectBase {
   Quaternion getQuaternion(void) const;
   std::vector<std::shared_ptr<RGBCamera>> getCameras(void) const;
   bool getCamera(const size_t cam_id, std::shared_ptr<RGBCamera> camera) const;
-  bool getCollision() const;
 
   // public set functions
   bool setState(const QuadState& state);
@@ -64,7 +63,8 @@ class Quadrotor : ObjectBase {
   inline Scalar getMass(void) { return dynamics_.getMass(); };
   inline void setSize(const Ref<Vector<3>> size) { size_ = size; };
   inline void setCollision(const bool collision) { collision_ = collision; };
-
+  inline bool getCollision() const { return collision_; };
+  
  private:
   // quadrotor dynamics, integrators
   QuadrotorDynamics dynamics_;
