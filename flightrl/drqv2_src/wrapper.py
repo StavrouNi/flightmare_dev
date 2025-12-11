@@ -10,6 +10,8 @@ from flightgym import QuadrotorEnv_v1
 from rpg_baselines.envs import vec_env_wrapper as wrapper
 
 CRASH_PENALTY = -4.0
+BODY_RATE_PENALTY_SCALE = 0.01
+PERCEPTION_REWARD_SCALE = 0.05
 
 class FlightmareDrQWrapper(gym.Env):
     def __init__(self, cfg, stack_frames=3):
@@ -36,10 +38,9 @@ class FlightmareDrQWrapper(gym.Env):
         self.observation_space = gym.spaces.Box(0, 255, shape=(self.channels, 84, 84), dtype=np.uint8)
         self.frame_buffer = deque(maxlen=stack_frames)
         self.current_gate_idx = 0
-        self.gate_radius = 0.75  # Meters ??
+        self.gate_radius = 1.0  # Meters?
         self.prev_dist = 0.0
 
-        self.current_step = 0  # For debugging
     def connect_and_warmup(self):
             """Connects to Unity only when we are actually ready."""
             print("[Wrapper] Connecting to Unity now...")
@@ -125,24 +126,7 @@ class FlightmareDrQWrapper(gym.Env):
         # Log the critical output before Python processes it
         # Assuming full_state = obs_state[0] is already extracted
         full_state = obs_state[0] 
-        V_linear = full_state[6:9]
-        linear_speed = np.linalg.norm(V_linear)
-        roll_angle = full_state[5]  # Index 5 (Rad)
-        pitch_angle = full_state[4] # Index 4 (Rad)
 
-        # --- Add to the existing print block ---
-        print(f"--- DEBUG STEP {self.current_step} ---")
-        x_pos = full_state[0]
-        y_pos = full_state[1]
-        z_pos = full_state[2]
-
-        print(f"drone full STATE: X={x_pos:.4f}, Y={y_pos:.4f}, Z={z_pos:.4f} ...")
-        print(f"SPEED: {linear_speed:.2f} m/s")
-        print(f"ROLL/PITCH: {roll_angle:.2f} / {pitch_angle:.2f} rad")
-        print(f"RAW C++ DONE: {cpp_done[0]}")
-        print(f"RAW C++ REWARD: {raw_rewards[0]:.4f}")
-        # ---------------------------------------
-        self.current_step += 1 # DEBUGGING
         # Reward
         full_state = obs_state[0]
         reward, done = self._compute_racing_reward(full_state, action, cpp_crash)
@@ -151,9 +135,11 @@ class FlightmareDrQWrapper(gym.Env):
         self.frame_buffer.append(img)
 
         drone_pos = obs_state[0, 0:3]
+        drone_quat = full_state[6:10]
     
         info = {
             "pos": drone_pos, 
+            "quat": drone_quat,
             "gate_idx": self.current_gate_idx,
             "gate_passed": False # You can update this in _compute_racing_reward if a gate is passed
         }
@@ -171,30 +157,60 @@ class FlightmareDrQWrapper(gym.Env):
     def _get_stacked_obs(self):
         return np.concatenate(list(self.frame_buffer), axis=0)
 
-    def _compute_racing_reward(self, full_state, action, cpp_done):
+    def _compute_perception_reward(self, drone_pos, full_state, target_pos):
+        """
+        Calculates the reward for pointing the camera at the target gate.
+        Formula: r_perc = lambda * exp(-delta_cam^4)
+        """
+        # Vector to Gate
+        target_vector = target_pos - drone_pos
+        dist_to_gate = np.linalg.norm(target_vector)
+        
+        if dist_to_gate < 1e-3:
+            return 0.0 # Already at the gate, angle undefined
+            
+        target_vector_norm = target_vector / dist_to_gate
 
+        # Camera Vector (Rotated Body X-axis)
+        # full_state[6:10] is Quaternion [qw, qx, qy, qz]?
+        quat = full_state[6:10]
+        camera_vector = self._rotate_vector_by_quaternion([1, 0, 0], quat)
+
+        # Angle (Delta)
+        dot_product = np.dot(target_vector_norm, camera_vector)
+        dot_product = np.clip(dot_product, -1.0, 1.0) # Safety clip
+        delta_cam = np.arccos(dot_product)
+
+        # use scaling = 0.025 (scaling factor from paper)
+        return np.exp(-1.0 * (delta_cam ** 4))
+
+    def _compute_racing_reward(self, full_state, action, cpp_done):
         drone_pos = full_state[0:3]
         body_rates = full_state[9:12]
-        if cpp_done:
-            target_pos = self.gate_positions[self.current_gate_idx]
-            self.prev_dist = np.linalg.norm(drone_pos - target_pos)
-            return CRASH_PENALTY, True
         
+        # cpp done indicates that we hit floor or collided ( if collision enabled)
+        if cpp_done:
+            return CRASH_PENALTY, True
+
+        # --- 3. Calculate Components ---
         target_pos = self.gate_positions[self.current_gate_idx]
         curr_dist = np.linalg.norm(drone_pos - target_pos)
-        print(f"Distance to Gate {self.current_gate_idx}: {curr_dist:.4f} m")
-        # Progress Reward
+
+        # 1 Progress Reward
         progress = (self.prev_dist - curr_dist)
+        
+        # 2 Perception Reward (Look at Gate)
+        r_perc = self._compute_perception_reward(drone_pos, full_state, target_pos)
 
-        # Large Body rates action penalty
-        high_body_rates_penalty = 0.01 * np.linalg.norm(body_rates)
+        # 3 Penalty (Smoothness)
+        high_body_rates_penalty = np.linalg.norm(body_rates)
 
-        # Reward
-        reward = 1.0 * progress - high_body_rates_penalty
+        # Total Reward Calculation ---
+        reward = (1.0 * progress) + PERCEPTION_REWARD_SCALE * r_perc - BODY_RATE_PENALTY_SCALE * high_body_rates_penalty
         
         self.prev_dist = curr_dist
         
-        # Gate Completion
+        # Gate Completion Logic ---
         if curr_dist < self.gate_radius:
             reward += 10.0
             print(f"Gate {self.current_gate_idx + 1} PASSED!")
@@ -202,17 +218,25 @@ class FlightmareDrQWrapper(gym.Env):
             self.current_gate_idx += 1
             if self.current_gate_idx >= len(self.gate_positions):
                 self.current_gate_idx = 0 # Loop
-                
-            # Update distance metric for new target
+            
+            # Reset distance metric for the NEW target
             new_target = self.gate_positions[self.current_gate_idx]
             self.prev_dist = np.linalg.norm(drone_pos - new_target)
             
-            
-        # 4. Python-Side Bounds Check (Ceiling/Walls)
-        # We can still check ceiling here since C++ might only check floor
-        if (drone_pos[2] > 8.0 or 
-            np.abs(drone_pos[0]) > 20.0 or np.abs(drone_pos[1]) > 20.0):
-            return CRASH_PENALTY, True
 
         return reward, False
-            
+
+    def _rotate_vector_by_quaternion(self, v, q):
+        """
+        Rotates vector v by quaternion q (qw, qx, qy, qz).
+        Formula: v' = q * v * q_inverse
+        """
+        vx, vy, vz = v
+        qw, qx, qy, qz = q
+        
+        # Standard vector rotation formula
+        x_new = (1 - 2*qy*qy - 2*qz*qz)*vx + (2*qx*qy - 2*qz*qw)*vy + (2*qx*qz + 2*qy*qw)*vz
+        y_new = (2*qx*qy + 2*qz*qw)*vx + (1 - 2*qx*qx - 2*qz*qz)*vy + (2*qy*qz - 2*qx*qw)*vz
+        z_new = (2*qx*qz - 2*qy*qw)*vx + (2*qy*qz + 2*qx*qw)*vy + (1 - 2*qx*qx - 2*qy*qy)*vz
+        
+        return np.array([x_new, y_new, z_new])

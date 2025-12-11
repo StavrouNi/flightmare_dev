@@ -36,8 +36,7 @@ QuadrotorEnv::QuadrotorEnv(const std::string &cfg_path)
   // define input and output dimension for the environment
   obs_dim_ = quadenv::kNObs;
   act_dim_ = quadenv::kNAct;
-  // set size to 0.5m cube for visualization
-  Vector<3> quad_size(0.5, 0.5, 0.5);
+  Vector<3> quad_size(0.2, 0.2, 0.2);
   quadrotor_ptr_->setSize(quad_size);
   Scalar mass = quadrotor_ptr_->getMass();
   act_mean_ = Vector<quadenv::kNAct>::Ones() * (-mass * Gz) / 4;
@@ -109,13 +108,13 @@ bool QuadrotorEnv::reset(Ref<Vector<>> obs, const bool random) {
     
     // A. Define the Box Size (The "Start Zone")
     // This creates a box: 2m long (X), 2m wide (Y), 1m tall (Z)
-    Scalar box_x_width = 2.0; 
-    Scalar box_y_width = 2.0;
-    Scalar box_z_width = 1.0;
+    // Scalar box_x_width = 2.0; 
+    // Scalar box_y_width = 2.0;
+    // Scalar box_z_width = 1.0;
 
     // B. Create a local random distribution [-0.5, 0.5]
     // scale the box width.
-    std::uniform_real_distribution<Scalar> dist(-0.5, 0.5);
+    // std::uniform_real_distribution<Scalar> dist(-0.5, 0.5);
 
     // C. Apply Position Noise
     // quad_state_.x(QS::POSX) += dist(random_gen_) * box_x_width;
@@ -216,7 +215,7 @@ Scalar QuadrotorEnv::step(const Ref<Vector<>> act, Ref<Vector<>> obs) {
 }
 
 bool QuadrotorEnv::isTerminalState(Scalar &reward) {
-  // if (quadrotor_ptr_->getCollision()) {
+  // if (quadrotor_ptr_->getCollision()) { # Something weird happens on gates with this
   //     logger_.info("Quadrotor collided!");
   //     reward = -4.0; 
   //     return true;    

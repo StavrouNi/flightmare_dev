@@ -295,6 +295,17 @@ if(BUILD_DEMOS)
     zmq
     zmqpp
     stdc++fs)
+  
+  # demo_quad_env - QuadrotorEnv with camera and gates
+  add_executable(demo_quad_env 
+    src/demos/demo_quad_env.cpp)
+  target_link_libraries(demo_quad_env PRIVATE
+    ${LIBRARY_NAME}
+    ${OpenCV_LIBRARIES}
+    yaml-cpp
+    zmq
+    zmqpp
+    stdc++fs)
 endif()
 
 message(STATUS "================  !Done. No more nightmare!  ================")

@@ -38,3 +38,6 @@ flightrender/Build/
 flightrender/Library/
 flightrender/Temp/
 flightrender/Logs/
+
+# runs (models and images)/
+flightrl/drqv2_src/runs/
