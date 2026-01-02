@@ -3,240 +3,272 @@ import numpy as np
 import gym
 from collections import deque
 from ruamel.yaml import YAML, dump, RoundTripDumper
-import cv2
 
 # Import Flightmare
 from flightgym import QuadrotorEnv_v1
 from rpg_baselines.envs import vec_env_wrapper as wrapper
 
 CRASH_PENALTY = -4.0
-BODY_RATE_PENALTY_SCALE = 0.01
-PERCEPTION_REWARD_SCALE = 0.05
+BODY_RATE_PENALTY_SCALE = 0.02
+PERCEPTION_REWARD_SCALE = 0.07
+GATE_HALF_WIDTH = 1.0 
+PASS_GATE_REWARD = 10.0
 
 class FlightmareDrQWrapper(gym.Env):
     def __init__(self, cfg, stack_frames=3):
-        """
-        Wrapper for DrQ-v2.
-        :param cfg: Dictionary loaded from vec_env.yaml (passed from train.py)
-        """
         self.cfg = cfg
         
-        # 1. Load Gates directly from 'quadrotor_env.yaml' file
-        # "flightlib/configs/quadrotor_env.yaml" Is the environment file we want here, not env.yaml
-        self.gate_positions = self._load_gates_from_file()
-        print(f"[Wrapper] Loaded {len(self.gate_positions)} gates from quadrotor_env.yaml")
+        # 1. Load Gates
+        self.gate_data = self._load_gates_from_file()
+        self.gate_positions = self.gate_data[:, 0:3] 
+        print(f"[Wrapper] Loaded {len(self.gate_positions)} gates")
 
         # 2. Initialize C++ Environment
-        # This uses the vec_env.yaml config passed from main()
         cfg_str = dump(cfg, Dumper=RoundTripDumper)
         self.env = wrapper.FlightEnvVec(QuadrotorEnv_v1(cfg_str, False))
 
-        # spaces, buffer, logic vars ...
+        # 3. Spaces
         self.action_space = gym.spaces.Box(-1, 1, shape=(4,), dtype=np.float32)
         self.stack_frames = stack_frames
         self.channels = 3 * stack_frames 
         self.observation_space = gym.spaces.Box(0, 255, shape=(self.channels, 84, 84), dtype=np.uint8)
         self.frame_buffer = deque(maxlen=stack_frames)
+        
+        # Logic Vars
         self.current_gate_idx = 0
-        self.gate_radius = 1.0  # Meters?
         self.prev_dist = 0.0
+        self.prev_pos = np.zeros(3)
 
     def connect_and_warmup(self):
-            """Connects to Unity only when we are actually ready."""
-            print("[Wrapper] Connecting to Unity now...")
-            self.env.connectUnity()
-            
-            print("[Wrapper] Warming up Unity Bridge...")
-            warmup_action = np.zeros((1, 4), dtype=np.float32)
-            for _ in range(10):
-                self.env.step(warmup_action)
+        print("[Wrapper] Connecting to Unity now...")
+        self.env.connectUnity()
+        print("[Wrapper] Warming up Unity Bridge...")
+        warmup_action = np.zeros((1, 4), dtype=np.float32)
+        for _ in range(10):
+            self.env.step(warmup_action)
 
     def _load_gates_from_file(self):
-        """Parses quadrotor_env.yaml to find gate positions."""
         fm_path = os.getenv("FLIGHTMARE_PATH")
         if fm_path is None:
-            # Fallback if env var is missing, though train.py usually checks this
             raise RuntimeError("FLIGHTMARE_PATH is not set")
-            
-        # Construct path to the PHYSICS config (where gates live)
         yaml_path = os.path.join(fm_path, "flightlib/configs/quadrotor_env.yaml")
-        
         try:
             quad_cfg = YAML().load(open(yaml_path, 'r'))
-            # Access the nested list: quadrotor_env -> gates
             gates_list = quad_cfg.get("quadrotor_env", {}).get("gates", [])
         except Exception as e:
-            print(f"[Wrapper] Error loading gates from {yaml_path}: {e}")
-            return np.zeros((1, 3)) # Safe fallback
+            print(f"[Wrapper] Error loading gates: {e}")
+            return np.zeros((1, 3))
 
         positions = []
+        orientations = []
         for g in gates_list:
-            # g['pos'] is a list [x, y, z] in the yaml
             positions.append(np.array(g['pos'], dtype=np.float32))
-        
+            orientations.append(g['yaw'])
         if not positions:
-            print("[Wrapper] WARNING: No gates found in quadrotor_env.yaml!")
             return np.zeros((1, 3))
-            
-        return np.array(positions)
+        return np.hstack((np.array(positions), np.array(orientations).reshape(-1, 1)))
 
     def reset(self):
-            # print("  [Wrapper] Resetting Physics...")
-            obs_state = self.env.reset()
-            
-            # Reset Logic variables
-            self.current_gate_idx = 0
-            drone_pos = obs_state[0, 0:3]
-            target_pos = self.gate_positions[self.current_gate_idx]
-            self.prev_dist = np.linalg.norm(drone_pos - target_pos)
-            
-            self.frame_buffer.clear()
-            
-            # Image Acquisition with retry logic because unity might initialize after 
-            # we do a zero RL step to wait rendering
-            img = None
-            max_retries = 5
-            
-            for attempt in range(max_retries):
-                try:
-                    # Attempt to get the image
-                    img = self._get_image_obs()
-                    if img is not None:
-                        print(f"  [Wrapper] Reset Image acquired on attempt {attempt+1}")
-                        break
-                except Exception as e:
-                    # If it failed (empty image), step the sim to force a render
-                    zero_action = np.zeros((1, 4), dtype=np.float32)
-                    self.env.step(zero_action)
-                    
-            if img is None:
-                raise RuntimeError("CRITICAL: Unity failed to render after reset!")
-
-            # Fill buffer with the valid image
-            for _ in range(self.stack_frames):
-                self.frame_buffer.append(img)
+        obs_state = self.env.reset()
+        quat = obs_state[0, 3:7] # [x, y, z, w]
+        # Reset Logic variables
+        self.prev_pos = obs_state[0, 0:3]
+        self.current_gate_idx = 0
+        drone_pos = obs_state[0, 0:3]
+        target_pos = self.gate_positions[self.current_gate_idx]
+        self.prev_dist = np.linalg.norm(drone_pos - target_pos)
+        
+        self.frame_buffer.clear()
+        
+        # Image Acquisition
+        img = None
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                img = self._get_image_obs()
+                if img is not None:
+                    break
+            except Exception as e:
+                self.env.step(np.zeros((1, 4), dtype=np.float32))
                 
-            return self._get_stacked_obs()
+        if img is None:
+            raise RuntimeError("CRITICAL: Unity failed to render after reset!")
+
+        for _ in range(self.stack_frames):
+            self.frame_buffer.append(img)
+            
+        return self._get_stacked_obs()
 
     def step(self, action):
-        # Step Physics
+        # 1. Step Physics
         action_vec = np.expand_dims(action, axis=0) 
         obs_state, raw_rewards, cpp_done, info = self.env.step(action_vec)
         cpp_crash = cpp_done[0]
-        # Log the critical output before Python processes it
-        # Assuming full_state = obs_state[0] is already extracted
-        full_state = obs_state[0] 
+        
+        full_state = obs_state[0] # Shape: (13,) changed euler to quat
 
-        # Reward
-        full_state = obs_state[0]
-        reward, done = self._compute_racing_reward(full_state, action, cpp_crash)
-        # Update Visuals
+        drone_pos = full_state[0:3]   # [x, y, z]
+        # drone_quat = full_state[3:7]  # [x, y, z, w]
+        drone_vel = full_state[7:10]   # [vx, vy, vz]
+        body_rates = full_state[10:13] # [wx, wy, wz]
+
+        qx, qy, qz, qw = full_state[3:7] # [x, y, z, w]
+
+
+
+        # Reconstruct quaternion vector for logic [x, y, z, w]
+        # (This matches Flightmare/Eigen convention used in your helpers)
+        drone_quat = np.array([qx, qy, qz, qw])
+
+
+        # 3. Calculate Reward Components
+        target_pos = self.gate_positions[self.current_gate_idx]
+        target_yaw = self.gate_data[self.current_gate_idx, 3]
+        curr_dist = np.linalg.norm(drone_pos - target_pos)
+
+        # A. Progress
+        progress = np.clip(self.prev_dist - curr_dist, -1.0, 1.0)
+        
+        # B. Perception 
+        r_perc, raw_dot_prod = self._compute_perception_components(drone_pos, drone_quat, target_pos)
+        
+        # C. Penalty
+        high_body_rates_penalty = np.linalg.norm(body_rates)
+
+        # D. Total Reward
+        reward = (1.0 * progress) + \
+                 (PERCEPTION_REWARD_SCALE * r_perc) - \
+                 (BODY_RATE_PENALTY_SCALE * high_body_rates_penalty)
+        
+        # Gate Logic
+        gate_passed = False
+        if self._check_gate_pass(self.prev_pos, drone_pos, target_pos, target_yaw):
+            reward += PASS_GATE_REWARD
+            gate_passed = True
+            print(f"Gate {self.current_gate_idx + 1} PASSED! (Robust Check)")
+            
+            self.current_gate_idx += 1
+            if self.current_gate_idx >= len(self.gate_positions):
+                self.current_gate_idx = 0 
+            
+            new_target = self.gate_positions[self.current_gate_idx]
+            self.prev_dist = np.linalg.norm(drone_pos - new_target)
+        else:
+            self.prev_dist = curr_dist
+        
+        #  Check Crash
+        if cpp_crash:
+            total_reward = reward + CRASH_PENALTY
+            
+            info = {
+                "gate_passed": gate_passed,         # True
+                "gate_idx": self.current_gate_idx,  # The gate we just passed
+                "collision": True
+            }
+            
+            return self._get_stacked_obs(), total_reward, True, info
+        
+        
+        self.prev_pos = drone_pos.copy()
+
+        # Visuals & Info
         img = self._get_image_obs()
         self.frame_buffer.append(img)
-
-        drone_pos = obs_state[0, 0:3]
-        drone_quat = full_state[6:10]
-    
+        
         info = {
             "pos": drone_pos, 
+            "vel": drone_vel,
             "quat": drone_quat,
             "gate_idx": self.current_gate_idx,
-            "gate_passed": False # You can update this in _compute_racing_reward if a gate is passed
+            "gate_passed": gate_passed,
+            "dist_to_gate": curr_dist,
+            "look_dot_prod": raw_dot_prod, 
+            "rew_total": reward,
+            "rew_progress": progress,
+            "rew_perception": r_perc * PERCEPTION_REWARD_SCALE,
+            "rew_penalty": high_body_rates_penalty * BODY_RATE_PENALTY_SCALE
         }
 
-        return self._get_stacked_obs(), reward, done, info
+        return self._get_stacked_obs(), reward, False, info
+
+
+    ## --- Helper Methods --- ##
 
     def _get_image_obs(self):
         img = self.env.get_rgb_image(0)
-        # 2. Check and Fix Colors
-        # Flightmare/OpenCV returns BGR. DrQ-v2. We will change to RGB for sim to real
         img_rgb = img[..., ::-1]
-        # Flip to (3, H, W) for PyTorch
         return np.transpose(img_rgb, (2, 0, 1)) 
 
     def _get_stacked_obs(self):
         return np.concatenate(list(self.frame_buffer), axis=0)
 
-    def _compute_perception_reward(self, drone_pos, full_state, target_pos):
-        """
-        Calculates the reward for pointing the camera at the target gate.
-        Formula: r_perc = lambda * exp(-delta_cam^4)
-        """
-        # Vector to Gate
+    # ---  With this setup, we initialize the drone at yaw=0 but it is looking on the +y. 
+    # So when we initialize the camera to look to the same direction with the drones nose it is returning 
+    # images from +y but thinks it is on +X, yaw = 0. ---
+    def _compute_perception_components(self, drone_pos, drone_quat, target_pos):
         target_vector = target_pos - drone_pos
         dist_to_gate = np.linalg.norm(target_vector)
         
-        if dist_to_gate < 1e-3:
-            return 0.0 # Already at the gate, angle undefined
-            
+        if dist_to_gate < 0.2: return 1.0, 1.0
+        
         target_vector_norm = target_vector / dist_to_gate
-
-        # Camera Vector (Rotated Body X-axis)
-        # full_state[6:10] is Quaternion [qw, qx, qy, qz]?
-        quat = full_state[6:10]
-        camera_vector = self._rotate_vector_by_quaternion([1, 0, 0], quat)
-
-        # Angle (Delta)
-        dot_product = np.dot(target_vector_norm, camera_vector)
-        dot_product = np.clip(dot_product, -1.0, 1.0) # Safety clip
-        delta_cam = np.arccos(dot_product)
-
-        # use scaling = 0.025 (scaling factor from paper)
-        return np.exp(-1.0 * (delta_cam ** 4))
-
-    def _compute_racing_reward(self, full_state, action, cpp_done):
-        drone_pos = full_state[0:3]
-        body_rates = full_state[9:12]
         
-        # cpp done indicates that we hit floor or collided ( if collision enabled)
-        if cpp_done:
-            return CRASH_PENALTY, True
+        # 30 deg Camera Tilt
+        angle = 0.5236 
+        camera_ray_body = np.array([0.0, np.cos(angle), np.sin(angle)]) 
+        camera_vector_world = self._rotate_vector_by_quaternion(camera_ray_body, drone_quat)
 
-        # --- 3. Calculate Components ---
-        target_pos = self.gate_positions[self.current_gate_idx]
-        curr_dist = np.linalg.norm(drone_pos - target_pos)
+        dot_prod = np.dot(target_vector_norm, camera_vector_world)
+        r_perc = (dot_prod + 1.0) / 2.0 
+        # --- LOGGING TO CONFIRM ALIGNMENT ---
+        # Add this momentarily to verify "Target" and "Camera" are pointing the same way
+        # print(f"Target: {target_vector_norm} | Camera: {camera_vector_world} | Dot: {dot_prod:.3f}")
+        return r_perc, dot_prod
 
-        # 1 Progress Reward
-        progress = (self.prev_dist - curr_dist)
+    def _check_gate_pass(self, prev_pos, curr_pos, gate_pos, gate_yaw):
+        gate_normal = np.array([np.cos(gate_yaw), np.sin(gate_yaw), 0.0])
+        vec_prev = prev_pos - gate_pos
+        vec_curr = curr_pos - gate_pos
+        dist_prev = np.dot(vec_prev, gate_normal)
+        dist_curr = np.dot(vec_curr, gate_normal)
+
+        if not (np.sign(dist_prev) != np.sign(dist_curr)):
+            return False
+
+        total_dist_change = dist_curr - dist_prev 
+        t = (0 - dist_prev) / total_dist_change
+        intersection_point = prev_pos + t * (curr_pos - prev_pos)
         
-        # 2 Perception Reward (Look at Gate)
-        r_perc = self._compute_perception_reward(drone_pos, full_state, target_pos)
+        vec_intersect = intersection_point - gate_pos
+        vec_in_gate_plane = vec_intersect - np.dot(vec_intersect, gate_normal) * gate_normal
+        lateral_dist = np.linalg.norm(vec_in_gate_plane[0:2])
+        vertical_dist = np.abs(vec_in_gate_plane[2])
 
-        # 3 Penalty (Smoothness)
-        high_body_rates_penalty = np.linalg.norm(body_rates)
-
-        # Total Reward Calculation ---
-        reward = (1.0 * progress) + PERCEPTION_REWARD_SCALE * r_perc - BODY_RATE_PENALTY_SCALE * high_body_rates_penalty
-        
-        self.prev_dist = curr_dist
-        
-        # Gate Completion Logic ---
-        if curr_dist < self.gate_radius:
-            reward += 10.0
-            print(f"Gate {self.current_gate_idx + 1} PASSED!")
-            
-            self.current_gate_idx += 1
-            if self.current_gate_idx >= len(self.gate_positions):
-                self.current_gate_idx = 0 # Loop
-            
-            # Reset distance metric for the NEW target
-            new_target = self.gate_positions[self.current_gate_idx]
-            self.prev_dist = np.linalg.norm(drone_pos - new_target)
-            
-
-        return reward, False
+        if lateral_dist <= GATE_HALF_WIDTH and vertical_dist <= GATE_HALF_WIDTH:
+            return True
+        return False
 
     def _rotate_vector_by_quaternion(self, v, q):
-        """
-        Rotates vector v by quaternion q (qw, qx, qy, qz).
-        Formula: v' = q * v * q_inverse
-        """
         vx, vy, vz = v
-        qw, qx, qy, qz = q
-        
-        # Standard vector rotation formula
+        qx, qy, qz, qw = q
         x_new = (1 - 2*qy*qy - 2*qz*qz)*vx + (2*qx*qy - 2*qz*qw)*vy + (2*qx*qz + 2*qy*qw)*vz
         y_new = (2*qx*qy + 2*qz*qw)*vx + (1 - 2*qx*qx - 2*qz*qz)*vy + (2*qy*qz - 2*qx*qw)*vz
         z_new = (2*qx*qz - 2*qy*qw)*vx + (2*qy*qz + 2*qx*qw)*vy + (1 - 2*qx*qx - 2*qy*qy)*vz
-        
         return np.array([x_new, y_new, z_new])
+    
+    def _convert_euler_to_quaternion(self, yaw, pitch, roll):
+        cy = np.cos(yaw * 0.5)
+        sy = np.sin(yaw * 0.5)
+        cp = np.cos(pitch * 0.5)
+        sp = np.sin(pitch * 0.5)
+        cr = np.cos(roll * 0.5)
+        sr = np.sin(roll * 0.5)
+
+        qw = cr * cp * cy + sr * sp * sy
+        qx = sr * cp * cy - cr * sp * sy
+        qy = cr * sp * cy + sr * cp * sy
+        qz = cr * cp * sy - sr * sp * cy
+
+        return np.array([qx, qy, qz, qw])  # [x, y, z, w] format
+    
+    

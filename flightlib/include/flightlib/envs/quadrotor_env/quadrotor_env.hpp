@@ -32,12 +32,12 @@ enum Ctl : int {
   kPos = 0,
   kNPos = 3,
   kOri = 3,
-  kNOri = 3,
-  kLinVel = 6,
+  kNOri = 4,
+  kLinVel = 7,
   kNLinVel = 3,
-  kAngVel = 9,
+  kAngVel = 10,
   kNAngVel = 3,
-  kNObs = 12,
+  kNObs = 13,
   // control actions
   kAct = 0,
   kNAct = 4,
@@ -52,7 +52,7 @@ class QuadrotorEnv final : public EnvBase {
   ~QuadrotorEnv();
 
   // - public OpenAI-gym-style functions
-  bool reset(Ref<Vector<>> obs, const bool random = true) override;
+  bool reset(Ref<Vector<>> obs, const bool random = false) override;
   Scalar step(const Ref<Vector<>> act, Ref<Vector<>> obs) override;
 
   // - public set functions
@@ -85,8 +85,7 @@ class QuadrotorEnv final : public EnvBase {
   Scalar pos_coeff_, ori_coeff_, lin_vel_coeff_, ang_vel_coeff_, act_coeff_;
   
   Eigen::Vector3d init_pos_{0.0, 0.0, 2.5};
-  
-  // observations and actions (for RL)
+  Quaternion init_quat_;  
   Vector<quadenv::kNObs> quad_obs_;
   Vector<quadenv::kNAct> quad_act_;
 
@@ -101,7 +100,7 @@ class QuadrotorEnv final : public EnvBase {
 
   YAML::Node cfg_;
   Matrix<3, 2> world_box_;
-  
+  bool isCollisionCustomOriented();
   // RGB cameras and gates
   std::vector<std::shared_ptr<RGBCamera>> rgb_cameras_;
   std::vector<std::shared_ptr<StaticGate>> gates_;

@@ -2,8 +2,15 @@ quadrotor_env:
    camera: yes
    sim_dt: 0.02 
    max_t: 5.0
-   init_pos: [-10.0, 0.0, 2.5]  # initial position of the quadrotor (x, y, z)
-  # Drone starts at [-10, 0, 2.5] facing Yaw 0 (East)
+   init_pos: [-10.0, 0.0, 2.5]  # For circle track
+   init_yaw: 0.0 # For circle track
+
+  #  init_pos: [-2.0, 0.0, 2.5]   # For figure 8 track
+  #  init_yaw: -0.36              # For figure 8 track
+
+  #  init_pos: [2.0, -3.0, 2.5]   # Kidney Track
+  #  init_yaw: 3.14             # Kidney Track
+
    gates:
     # ---  CIRCLE ---
     - pos: [-10.0, 3.0, 2.5]
@@ -17,36 +24,51 @@ quadrotor_env:
 
     - pos: [-5.0, -2.0, 2.5]
       yaw:  1.57
+    # ---  CIRCLE END ---
 
-    # --- CUSTOM OVAL  ---
+    # --- Figure 8 track  ---
+    # - pos: [6.0, -3.0, 2.5]
+    #   yaw:  1.57            
 
-    # # 1. First Gate (Straight ahead, 5m away)
-    # - pos: [-10.0, 3.0, 2.5]
-    #   yaw: 0.0
+    # - pos: [8.0, 0.0 , 2.5]
+    #   yaw:  3.14159         
 
-    # # 2. Second Gate (Straight ahead, 10m away - entering turn)
-    # - pos: [-5.0, 8.0, 2.5]
-    #   yaw: -0.4 # 20 
+    # - pos: [6.0, 3.0 , 2.5]
+    #   yaw: -1.57             
 
-    # # 3. Far East Turn (Banking Left)
-    # - pos: [3.0, 8.0, 2.5]
-    #   yaw: 0.4 # -20 
+    # - pos: [-2.0, -3.0, 2.5]
+    #   yaw:  -1.57             
 
-    # # 4. Back Straight 
-    # - pos: [7.0, 0.0, 2.5]
-    #   yaw: 0.0 #   
+    # - pos: [-4.0, 0.0 , 2.5]
+    #   yaw:  3.14159          
 
-    # # 5. Return Gate
-    # - pos: [3.0, -6.0, 2.5]
-    #   yaw: -0.4 #  
+    # - pos: [-2.0, 3.0 , 2.5]
+    #   yaw: 1.57             
+    # --- Figure 8 track end ---
 
-    # # 6. Final Turn (Banking Left to rejoin start)
-    # - pos: [-5.0, -6.0, 2.5]
-    #   yaw: 0.4 #  
+    # --- Kidney Track  ---
+    # - pos: [0.0, -3.0, 2.5]
+    #   yaw:  1.57            
+
+    # - pos: [-3.0, 0.0 , 2.5]
+    #   yaw:  3.14159         
+
+    # - pos: [0.0, 3.0 , 2.5]
+    #   yaw: 3.14159             
+
+    # - pos: [-3.0, 6.0, 2.5]
+    #   yaw:  3.14159             
+
+    # - pos: [0.0, 9.0 , 2.5]
+    #   yaw:  1.57          
+
+    # - pos: [4.0, 3.0 , 2.5]
+    #   yaw: 3.14159  
+    # --- Kidney Track end --- 
 
 quadrotor_dynamics:
-  mass: 0.73
-  arm_l: 0.17
+  mass: 0.6 
+  arm_l: 0.14
   motor_omega_min: 150.0 # motor rpm min
   motor_omega_max: 3000.0 # motor rpm max
   motor_tau: 0.0001 # motor step response

@@ -15,9 +15,13 @@ QuadrotorEnv::QuadrotorEnv(const std::string &cfg_path)
     lin_vel_coeff_(0.0),
     ang_vel_coeff_(0.0),
     act_coeff_(0.0),
-    goal_state_((Vector<quadenv::kNObs>() << 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0,
-                 0.0, 0.0, 0.0, 0.0, 0.0)
-                  .finished()) {
+    goal_state_((Vector<quadenv::kNObs>() << 
+             0.0, 0.0, 5.0,  // Goal Position
+             0.0, 0.0, 0.0, 1.0, // Goal Quaternion (Identity)
+             0.0, 0.0, 0.0,  // Goal Lin Vel
+             0.0, 0.0, 0.0   // Goal Ang Vel
+             ).finished())
+    {
   // load configuration file
   YAML::Node cfg_ = YAML::LoadFile(cfg_path);
 
@@ -46,7 +50,29 @@ QuadrotorEnv::QuadrotorEnv(const std::string &cfg_path)
   // --- camera ---
   auto rgb_cam = std::make_shared<RGBCamera>();
   Vector<3> B_r_BC(0.0, 0.0, 0.3);
-  Matrix<3, 3> R_BC = Quaternion(1.0, 0.0, 0.0, 0.0).toRotationMatrix();
+  // OLD (Flat):
+  // Matrix<3, 3> R_BC = Quaternion(1.0, 0.0, 0.0, 0.0).toRotationMatrix();
+
+  // NEW (30 deg Up-Tilt):
+  // After ROS→Unity transform: ROS X→Unity X, ROS Y→Unity Z, ROS Z→Unity Y
+  // For Unity pitch-up (around Unity X), we need ROS rotation around X-axis
+  // Positive rotation around X pitches "up" in Unity (camera looks up)
+  // 30° = 0.5236 rad: cos(15°)=0.966, sin(15°)=0.259
+  // Matrix<3, 3> R_BC = Quaternion(0.966, 0.259, 0.0, 0.0).toRotationMatrix();
+  // We rotate the camera -90 (Right) to align it with Physics Forward (+X).
+  // 1. Yaw Fix: -90 deg around Z (Corrects the "Left-Looking" Asset)
+  //    w = cos(-45) = 0.707, z = sin(-45) = -0.707
+  // Quaternion q_yaw = Quaternion(0.707, 0.0, 0.0, -0.707);
+
+  // 2. Pitch Fix: 30 deg Up-Tilt
+  //    You found that rotating around X (0.259) gave the correct Up-Tilt.
+  Quaternion q_pitch = Quaternion(0.966, 0.259, 0.0, 0.0);
+
+  // 3. Combine: Apply Pitch first, then Yaw correction
+  Quaternion q_cam_mount = q_pitch; 
+  
+  Matrix<3, 3> R_BC = q_cam_mount.toRotationMatrix();
+  
   rgb_cam->setFOV(90);
   rgb_cam->setWidth(84);
   rgb_cam->setHeight(84);
@@ -84,9 +110,7 @@ QuadrotorEnv::QuadrotorEnv(const std::string &cfg_path)
   
   // Use the position we just loaded from YAML
   initial_state.p = init_pos_.cast<Scalar>(); 
-  
-  // Ensure rotation is identity (flat)
-  initial_state.q() = Quaternion(1.0, 0.0, 0.0, 0.0);
+  initial_state.q(init_quat_);
 
   // Apply it to the internal physics object
   quadrotor_ptr_->reset(initial_state);
@@ -101,48 +125,9 @@ bool QuadrotorEnv::reset(Ref<Vector<>> obs, const bool random) {
   // 1. First, set the drone to the safe center point (read from YAML)
   quad_state_.p = init_pos_.cast<Scalar>(); 
 
-  if (random) {
-    // -----------------------------------------------------------------------
-    // "NOISY BOX"  INITIALIZATION LOGIC
-    // -----------------------------------------------------------------------
-    
-    // A. Define the Box Size (The "Start Zone")
-    // This creates a box: 2m long (X), 2m wide (Y), 1m tall (Z)
-    // Scalar box_x_width = 2.0; 
-    // Scalar box_y_width = 2.0;
-    // Scalar box_z_width = 1.0;
-
-    // B. Create a local random distribution [-0.5, 0.5]
-    // scale the box width.
-    // std::uniform_real_distribution<Scalar> dist(-0.5, 0.5);
-
-    // C. Apply Position Noise
-    // quad_state_.x(QS::POSX) += dist(random_gen_) * box_x_width;
-    // quad_state_.x(QS::POSY) += dist(random_gen_) * box_y_width;
-    // quad_state_.x(QS::POSZ) += dist(random_gen_) * box_z_width;
-
-    // Safety check: Don't let noise push it into the floor
-    // if (quad_state_.x(QS::POSZ) < 0.1) {
-    //     quad_state_.x(QS::POSZ) = 0.5; // Force minimum height
-    // }
-
-    // D. Apply Yaw (Rotation) Noise
-    // Let the drone face roughly forward, but +/- 30 degrees (approx 0.5 radians)
-    Scalar yaw_amplitude = 30.0 * M_PI / 180.0; 
-    // Scalar random_yaw = dist(random_gen_) * 2.0 * yaw_amplitude; // dist gives -0.5 to 0.5, so *2 gives -1 to 1
-
-    // Convert Yaw to Quaternion
-    // formula: q = [cos(yaw/2), 0, 0, sin(yaw/2)] for pure Z-rotation
-    quad_state_.q() = Quaternion(std::cos(0.5 * yaw_amplitude), 0.0, 0.0, std::sin(0.5 * yaw_amplitude));
-
-
-
-  } else {
-    // Non-random: Perfect, stable hover at the init position
-    // Reset orientation to Identity (facing forward, flat)
-    quad_state_.q() = Quaternion(1.0, 0.0, 0.0, 0.0);
-  }
-
+  // Always use the quaternion loaded from the YAML config
+  quad_state_.q(init_quat_); 
+  
   // Apply this calculated state to the dynamics simulator
   quadrotor_ptr_->reset(quad_state_);
 
@@ -158,10 +143,10 @@ bool QuadrotorEnv::reset(Ref<Vector<>> obs, const bool random) {
 bool QuadrotorEnv::getObs(Ref<Vector<>> obs) {
   quadrotor_ptr_->getState(&quad_state_);
 
-  // convert quaternion to euler angle
-  Vector<3> euler_zyx = quad_state_.q().toRotationMatrix().eulerAngles(2, 1, 0);
-  // quaternionToEuler(quad_state_.q(), euler);
-  quad_obs_ << quad_state_.p, euler_zyx, quad_state_.v, quad_state_.w;
+  Quaternion q = quad_state_.q();
+  Vector<4> q_vec(q.x(), q.y(), q.z(), q.w());
+  
+  quad_obs_ << quad_state_.p, q_vec, quad_state_.v, quad_state_.w;
 
   obs.segment<quadenv::kNObs>(quadenv::kObs) = quad_obs_;
   return true;
@@ -220,6 +205,13 @@ bool QuadrotorEnv::isTerminalState(Scalar &reward) {
   //     reward = -4.0; 
   //     return true;    
   // }
+  Vector<3> p_crash = quad_state_.p;
+  if (isCollisionCustomOriented()) {
+      logger_.info("Quadrotor collided (Gate) at P=[%.2f, %.2f, %.2f]", p_crash(0), p_crash(1), p_crash(2));
+      // logger_.info("Quadrotor collided with gate (OBB)!");
+      reward = -4.0; 
+      return true;    
+  }
   if (quad_state_.x(QS::POSZ) <= 0.02) {
     logger_.info("Quadrotor crashed to the ground!");
     reward = -4.0;
@@ -237,12 +229,23 @@ bool QuadrotorEnv::loadParam(const YAML::Node &cfg) {
     return false;
   }
   if (cfg["quadrotor_env"]["init_pos"]) {
-        std::vector<Scalar> pos = cfg["quadrotor_env"]["init_pos"].as<std::vector<Scalar>>();
-        init_pos_ << pos[0], pos[1], pos[2];
-      } else {
-        logger_.warn("No init_pos in YAML, using default [0,0,2.5]");
-        init_pos_ << 0.0, 0.0, 2.5;
-      }
+      std::vector<Scalar> pos = cfg["quadrotor_env"]["init_pos"].as<std::vector<Scalar>>();
+      init_pos_ << pos[0], pos[1], pos[2];
+    } else {
+      logger_.warn("No init_pos in YAML, using default [0,0,2.5]");
+      init_pos_ << 0.0, 0.0, 2.5;
+    }
+  if (cfg["quadrotor_env"]["init_yaw"]) {
+    Scalar init_yaw = cfg["quadrotor_env"]["init_yaw"].as<Scalar>();
+    // Convert yaw (rotation around Z-axis) to Quaternion and store it
+    init_quat_ = Quaternion(std::cos(0.5 * init_yaw), 0.0, 0.0, std::sin(0.5 * init_yaw));
+    logger_.info("Initial Yaw loaded: %.2f rad. -> Quaternion: [w=%.3f, x=%.3f, y=%.3f, z=%.3f]",
+        init_yaw, init_quat_.w(), init_quat_.x(), init_quat_.y(), init_quat_.z());
+  } else {
+    // Default to identity quaternion (no rotation)
+    logger_.warn("No init_yaw in YAML, using default 0.0 rad.");
+    init_quat_ = Quaternion(1.0, 0.0, 0.0, 0.0);
+  }
   if (cfg["rl"]) {
     // load reinforcement learning related parameters
     pos_coeff_ = cfg["rl"]["pos_coeff"].as<Scalar>();
@@ -317,6 +320,57 @@ void QuadrotorEnv::addObjectsToUnity(std::shared_ptr<UnityBridge> bridge) {
   for (auto& gate : gates_) {
     bridge->addStaticObject(gate);
   }
+}
+
+bool QuadrotorEnv::isCollisionCustomOriented() {
+    // 1. Configuration
+    const Scalar DRONE_RADIUS = 0.1; 
+    const Scalar HOLE_HALF_SIZE = 1.0;          // 2m wide hole
+    const Scalar OUTER_FRAME_HALF_SIZE = 1.15;  // 15cm thick rim
+    const Scalar GATE_THICKNESS_HALF = 0.05;    // 10cm depth
+
+    // 2. Thresholds
+    const Scalar Y_DEPTH_THRESH = GATE_THICKNESS_HALF + DRONE_RADIUS;
+    const Scalar SAFE_HOLE_LIMIT = HOLE_HALF_SIZE - DRONE_RADIUS;
+    const Scalar OUTER_LIMIT = OUTER_FRAME_HALF_SIZE + DRONE_RADIUS;
+
+    // 3. Current State
+    const Vector<3> P_W = quad_state_.p;
+
+    for (const auto& gate : gates_) {
+        const Vector<3> G_pos_W = gate->getPosition().cast<Scalar>();
+        // Using toRotationMatrix guarantees clean rotation handling
+        const Matrix<3, 3> R_WG = gate->getQuaternion().cast<Scalar>().toRotationMatrix();
+        
+        // Transform P_W to Local Gate Frame (P_G)
+        // Local X=Right, Y=Normal(Depth), Z=Up
+        const Vector<3> P_G = R_WG.transpose() * (P_W - G_pos_W);
+        const Vector<3> dist = P_G.cwiseAbs(); 
+
+        // CHECK 1: Y-AXIS (Depth) - Are we inside the gate's "slice"?
+        if (dist(1) < Y_DEPTH_THRESH) {
+            
+            // Condition A: Are we INSIDE the Safe Hole?
+            bool inside_hole_x = (dist(0) < SAFE_HOLE_LIMIT);
+            bool inside_hole_z = (dist(2) < SAFE_HOLE_LIMIT);
+
+            if (inside_hole_x && inside_hole_z) {
+                continue; // CLEAN PASS -> Next gate
+            }
+
+            // Condition B: Are we hitting the Frame?
+            // We crash if we are OUTSIDE the hole, but INSIDE the outer dimensions
+            bool inside_outer_x = (dist(0) < OUTER_LIMIT);
+            bool inside_outer_z = (dist(2) < OUTER_LIMIT);
+            
+            if (inside_outer_x && inside_outer_z) {
+                // LOG THE LOCAL COORDS so we know exactly where we hit
+                logger_.info("Hit Gate Rim! Local: [%.2f, %.2f, %.2f]", P_G(0), P_G(1), P_G(2));
+                return true; 
+            }
+        }
+    }
+    return false;
 }
 
 std::ostream &operator<<(std::ostream &os, const QuadrotorEnv &quad_env) {
