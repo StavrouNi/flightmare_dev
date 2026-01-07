@@ -43,8 +43,20 @@ QuadrotorEnv::QuadrotorEnv(const std::string &cfg_path)
   Vector<3> quad_size(0.2, 0.2, 0.2);
   quadrotor_ptr_->setSize(quad_size);
   Scalar mass = quadrotor_ptr_->getMass();
-  act_mean_ = Vector<quadenv::kNAct>::Ones() * (-mass * Gz) / 4;
-  act_std_ = Vector<quadenv::kNAct>::Ones() * (-mass * 2 * Gz) / 4;
+  
+  // Action scaling for collective thrust + body rates control
+  // Actions from wrapper: [collective_thrust, roll_rate, pitch_rate, yaw_rate]
+  // collective_thrust in [0, 1] → maps to [0, max_collective_thrust] m/s²
+  // body_rates in [-1, 1] → maps to [-omega_max, omega_max] rad/s
+  // 
+  // Scaling formula: scaled_action = action * act_std_ + act_mean_
+  // For thrust [0,1]: scaled = action * max_thrust + 0 → [0, max_thrust] ✓
+  // For rates [-1,1]: scaled = action * omega_max + 0 → [-omega_max, omega_max] ✓
+  Scalar max_collective_thrust = quadrotor_ptr_->getDynamics().getForceMax() / mass;  // m/s²
+  Vector<3> omega_max = quadrotor_ptr_->getDynamics().getOmegaMax();  // rad/s
+  
+  act_mean_ = Vector<quadenv::kNAct>::Zero();  // [0, 0, 0, 0]
+  act_std_ << max_collective_thrust, omega_max(0), omega_max(1), omega_max(2);
 
   // in constructor
   // --- camera ---
@@ -155,8 +167,31 @@ bool QuadrotorEnv::getObs(Ref<Vector<>> obs) {
 Scalar QuadrotorEnv::step(const Ref<Vector<>> act, Ref<Vector<>> obs) {
   quad_act_ = act.cwiseProduct(act_std_) + act_mean_;
   cmd_.t += sim_dt_;
-  cmd_.thrusts = quad_act_;
-
+  
+  // Use collective thrust + body rates control
+  cmd_.collective_thrust = quad_act_(0);  // Collective thrust (m/s²)
+  cmd_.omega << quad_act_(1), quad_act_(2), quad_act_(3);  // Body rates (rad/s)
+  
+  // DEBUG: Log every 100 steps AFTER setting the command
+  static int debug_counter = 0;
+  if (debug_counter % 100 == 0) {
+    std::cout << "\n[C++ DEBUG " << debug_counter << "]" << std::endl;
+    std::cout << "  act (from wrapper): " << act.transpose() << std::endl;
+    std::cout << "  act_std_: " << act_std_.transpose() << std::endl;
+    std::cout << "  act_mean_: " << act_mean_.transpose() << std::endl;
+    std::cout << "  quad_act_ (scaled): " << quad_act_.transpose() << std::endl;
+    std::cout << "  cmd_.collective_thrust (AFTER assignment): " << cmd_.collective_thrust << std::endl;
+    std::cout << "  cmd_.omega (AFTER assignment): " << cmd_.omega.transpose() << std::endl;
+    std::cout << "  Drone mass: " << quadrotor_ptr_->getMass() << " kg" << std::endl;
+    std::cout << "  Gravity accel: 9.81 m/s²" << std::endl;
+    std::cout << "  Hover thrust needed: " << 9.81 << " m/s²" << std::endl;
+  }
+  debug_counter++;
+  
+  // CRITICAL: Invalidate thrusts vector so isSingleRotorThrusts() returns false
+  // This ensures the code uses runFlightCtl() instead of direct motor control
+  cmd_.thrusts.setConstant(NAN);
+  
   // simulate quadrotor
   quadrotor_ptr_->run(cmd_, sim_dt_);
 

@@ -10,7 +10,7 @@ static constexpr Scalar CTRL_UPDATE_FREQUENCY = 50.0;
 static constexpr int SIM_STEPS_N = 20;
 
 TEST(Quadrotor, Constructor) {
-  QuadrotorDynamics dynamics(1.0, 0.2);
+  QuadrotorDynamics dynamics(1.0);
   Quadrotor quad0(dynamics);
 
   QuadState quad_state;

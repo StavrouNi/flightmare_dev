@@ -200,7 +200,11 @@ def run_training_loop(env, agent, replay_buffer, writer, debugger, start_step, r
                     debugger.log_step(info["pos"])
                     
                     # Construct state vector
+                    vel = info.get("vel", np.zeros(3))
                     drone_state_7d = np.concatenate([info["pos"], info["quat"]])
+                    velocity_3d = vel
+                    # Use the remapped action that was actually executed, not the raw RL output
+                    action_4d = info.get("action", action)  # Fallback to raw action if not in info
                     step_reward_1d = np.array([reward])
                     flat_gate_pos = gate_positions_for_save.flatten()
 
@@ -212,10 +216,12 @@ def run_training_loop(env, agent, replay_buffer, writer, debugger, start_step, r
                     reward_components = np.array([r_prog, r_perc, r_pen, r_gate])
                     
                     full_state_row = np.concatenate([
-                        drone_state_7d, 
-                        step_reward_1d, 
-                        flat_gate_pos,
-                        reward_components 
+                        drone_state_7d,   # 0-6
+                        velocity_3d,      # 7-9  <-- NEW
+                        action_4d,        # 10-13 <-- NEW
+                        step_reward_1d,   # 14
+                        flat_gate_pos,    # 15...
+                        reward_components # ...End
                     ])
                     
                     full_state_buffer.append(full_state_row) 

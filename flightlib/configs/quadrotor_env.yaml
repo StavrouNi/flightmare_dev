@@ -2,29 +2,52 @@ quadrotor_env:
    camera: yes
    sim_dt: 0.02 
    max_t: 5.0
-   init_pos: [-10.0, 0.0, 2.5]  # For circle track
-   init_yaw: 0.0 # For circle track
+
+  #  init_pos: [-10.0, 0.0, 2.5]  # For circle track
+  #  init_yaw: 0.0 # For circle track
+  
+   init_pos: [2.0, -3.0, 2.5]   # Kidney Track
+   init_yaw: 1.57             # Kidney Track
 
   #  init_pos: [-2.0, 0.0, 2.5]   # For figure 8 track
   #  init_yaw: -0.36              # For figure 8 track
 
-  #  init_pos: [2.0, -3.0, 2.5]   # Kidney Track
-  #  init_yaw: 3.14             # Kidney Track
+
 
    gates:
     # ---  CIRCLE ---
-    - pos: [-10.0, 3.0, 2.5]
-      yaw: 0.0
+    # - pos: [-10.0, 3.0, 2.5]
+    #   yaw: 0.0
     
-    - pos: [-5.0, 8.0, 2.5]
-      yaw:  1.57
+    # - pos: [-5.0, 8.0, 2.5]
+    #   yaw:  1.57
 
-    - pos: [0.0, 3.0, 2.5]
-      yaw: 0.0
+    # - pos: [0.0, 3.0, 2.5]
+    #   yaw: 0.0
 
-    - pos: [-5.0, -2.0, 2.5]
-      yaw:  1.57
+    # - pos: [-5.0, -2.0, 2.5]
+    #   yaw:  1.57
     # ---  CIRCLE END ---
+
+    # --- Kidney Track  ---
+    - pos: [0.0, -3.0, 2.5]
+      yaw:  1.57            
+
+    - pos: [-3.0, 0.0 , 2.5]
+      yaw:  3.14159         
+
+    - pos: [0.0, 3.0 , 2.5]
+      yaw: 3.14159             
+
+    - pos: [-3.0, 6.0, 2.5]
+      yaw:  3.14159             
+
+    - pos: [0.0, 9.0 , 2.5]
+      yaw:  1.57          
+
+    - pos: [4.0, 3.0 , 2.5]
+      yaw: 3.14159  
+    # --- Kidney Track end --- 
 
     # --- Figure 8 track  ---
     # - pos: [6.0, -3.0, 2.5]
@@ -46,35 +69,43 @@ quadrotor_env:
     #   yaw: 1.57             
     # --- Figure 8 track end ---
 
-    # --- Kidney Track  ---
-    # - pos: [0.0, -3.0, 2.5]
-    #   yaw:  1.57            
-
-    # - pos: [-3.0, 0.0 , 2.5]
-    #   yaw:  3.14159         
-
-    # - pos: [0.0, 3.0 , 2.5]
-    #   yaw: 3.14159             
-
-    # - pos: [-3.0, 6.0, 2.5]
-    #   yaw:  3.14159             
-
-    # - pos: [0.0, 9.0 , 2.5]
-    #   yaw:  1.57          
-
-    # - pos: [4.0, 3.0 , 2.5]
-    #   yaw: 3.14159  
-    # --- Kidney Track end --- 
 
 quadrotor_dynamics:
-  mass: 0.6 
-  arm_l: 0.14
-  motor_omega_min: 150.0 # motor rpm min
-  motor_omega_max: 3000.0 # motor rpm max
-  motor_tau: 0.0001 # motor step response
+  # --- 1. Mass & Inertia (From DreamerV3 Paper) ---
+  mass: 0.6
+  # The paper specifies this exact diagonal inertia matrix
+  inertia: [0.002410, 0.001800, 0.003759]
+
+  # --- 2. Geometry (Calculated) ---
+  # The new code requires x/y positions for each motor.
+  # The paper has Arm Length = 0.14m. 
+  # For an "X" config, x = y = 0.14 * cos(45) = 0.09899m
+  tbm_fr: [0.09899, -0.09899, 0.0]  # Front Right
+  tbm_bl: [-0.09899, 0.09899, 0.0]  # Back Left
+  tbm_br: [-0.09899, -0.09899, 0.0] # Back Right
+  tbm_fl: [0.09899, 0.09899, 0.0]   # Front Left
+
+  # --- 3. Propellers & Motors (From DreamerV3 Paper) ---
+  kappa: 0.022   # Torque coefficient
+  
+  # Polynomial coefficients for Thrust vs RPM (From Paper)
   thrust_map: [1.3298253500372892e-06, 0.0038360810526746033, -1.7689986848125325]
-  kappa: 0.016 # rotor drag coeff
-  omega_max: [6.0, 6.0, 6.0]  # body rate constraint (x, y, z) 
+  
+  # Limits
+  # We calculated 1100 RPM to hit the paper's 4.0N Max Thrust limit
+  motor_omega_min: 150.0
+  motor_omega_max: 1100.0  
+  motor_tau: 0.0001
+  
+  # Angular velocity limits (Paper doesn't specify, 6.0 rad/s is standard safe value)
+  omega_max: [6.0, 6.0, 6.0] 
+
+  # --- 4. Aerodynamics (Required by new code, not in Paper) ---
+  # We set these to low/standard values so they don't interfere with the main dynamics
+  # Drag is not used now. 
+  body_drag_1: [0.26, 0.28, 0.42]
+  body_drag_3: [0.00, 0.00, 0.00]
+  body_drag_h: 0.01
 
 rl:
   pos_coeff: -0.002        # reward coefficient for position 

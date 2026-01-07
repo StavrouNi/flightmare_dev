@@ -53,9 +53,23 @@ bool Quadrotor::run(const Scalar ctl_dt) {
 
     const Vector<4> force_torques = B_allocation_ * motor_thrusts_;
 
-    // Compute linear acceleration and body torque
-    const Vector<3> force(0.0, 0.0, force_torques[0]);
-    state_.a = state_.q() * force * 1.0 / dynamics_.getMass() + gz_;
+    // ---------------- START OF DRAG  ----------------
+    // 1. Convert current World Velocity to Body Frame
+    // v_body = R^T * v_world
+    Vector<3> v_body = state_.q().inverse() * state_.v;
+
+    // 2. Calculate Drag Force (in Body Frame)
+    // This uses the coefficients (kappa, cd1, etc.) from your dynamics class
+    Vector<3> drag_force_body = -dynamics_.getBodyDrag(v_body);
+
+    // 3. Combine Thrust (Z-axis) with Drag (All axes)
+    Vector<3> thrust_force_body(0.0, 0.0, force_torques[0]); 
+    Vector<3> total_force_body = thrust_force_body + drag_force_body;
+
+    // 4. Compute Linear Acceleration
+    // a = (R * F_total) / m + g
+    state_.a = state_.q() * total_force_body * (1.0 / dynamics_.getMass()) + gz_;
+    // ---------------- END OF DRAG  ----------------
 
     // compute body torque
     state_.tau = force_torques.segment<3>(1);
@@ -134,8 +148,11 @@ bool Quadrotor::setCommand(const Command &cmd) {
   if (!cmd.valid()) return false;
   cmd_ = cmd;
 
-  if (std::isfinite(cmd_.collective_thrust))
-    cmd_.collective_thrust = dynamics_.clampThrust(cmd_.collective_thrust);
+  // NOTE: collective_thrust is in m/s² (acceleration), not Newtons (force)!
+  // Do NOT clamp it with motor thrust limits which are in Newtons.
+  // The conversion to motor thrusts happens in runFlightCtl(), where clamping occurs.
+  // if (std::isfinite(cmd_.collective_thrust))
+  //   cmd_.collective_thrust = dynamics_.clampThrust(cmd_.collective_thrust);
 
   if (cmd_.omega.allFinite()) cmd_.omega = dynamics_.clampBodyrates(cmd_.omega);
 

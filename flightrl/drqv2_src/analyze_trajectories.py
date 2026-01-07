@@ -42,6 +42,8 @@ GATE_POSES_REF = np.array([
 
 NUM_GATES = GATE_POSES_REF.shape[0]
 
+# ... (Imports and Config remain the same) ...
+
 # ==============================================================================
 # 2. HELPER FUNCTIONS
 # ==============================================================================
@@ -66,8 +68,8 @@ def rotate_and_draw_gate(ax, center, yaw, half_size, color, label_idx):
 
 def load_robust_trajectory(npy_path):
     """
-    Loads data based on the specific structure in train.py:
-    [State(7) | Reward(1) | Gates(...) | Prog(1) | Perc(1) | Pen(1) | GatePass(1)]
+    Loads data matching the specific structure in train.py:
+    [State(7) | Vel(3) | Act(4) | Reward(1) | Gates(...) | Prog(1) | Perc(1) | Pen(1) | GatePass(1)]
     """
     try:
         data = np.load(npy_path)
@@ -75,94 +77,112 @@ def load_robust_trajectory(npy_path):
         # 1. Drone State (Cols 0-6)
         drone_states = data[:, 0:7]
         
-        # 2. Total Reward (Col 7)
-        total_rewards = data[:, 7]
+        # 2. Linear Velocities (Cols 7-9) -> CORRECTED
+        velocities = data[:, 7:10]
+
+        # 3. Actions (Cols 10-13) -> CORRECTED
+        actions = data[:, 10:14]
         
-        # 3. Components (Last 4 Cols)
-        # saved as: [r_prog, r_perc, r_pen, r_gate]
+        # 4. Total Reward (Col 14) -> CORRECTED
+        total_rewards = data[:, 14]
+        
+        # 5. Components (Last 4 Cols)
+        # These are safe to access via negative indexing
         progress_rews = data[:, -4]
         perc_rewards  = data[:, -3]
         penalty_rews  = data[:, -2]
         gate_pass_flags = data[:, -1]
 
-        return drone_states, total_rewards, progress_rews, perc_rewards, penalty_rews, GATE_POSES_REF
+        return drone_states, total_rewards, actions, velocities, progress_rews, perc_rewards, penalty_rews, GATE_POSES_REF
 
     except Exception as e:
         print(f"Error loading {npy_path}: {e}")
-        return None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None
 
-def plot_dashboard(drone_states, total_rewards, progress_rews, perc_rewards, gates_ref, episode_idx, run_dir):
-    fig = plt.figure(figsize=(16, 12))
-    
-    # --- TOP PLOT: 3D Trajectory ---
-    ax3d = fig.add_subplot(2, 1, 1, projection='3d')
+def plot_dashboard(drone_states, total_rewards, actions, velocities, progress_rews, perc_rewards, gates_ref, episode_idx, run_dir):
+    # Calculate derived speed (magnitude of position change)
     drone_pos = drone_states[:, 0:3]
+    speeds = calculate_speed_proxy(drone_pos)
+
+    # INCREASED FIG HEIGHT: 5 Rows now
+    fig = plt.figure(figsize=(16, 20))
     
-    # Color path by Total Reward
+    # --- PLOT 1: 3D Trajectory (Row 1) ---
+    ax3d = fig.add_subplot(5, 1, 1, projection='3d')
     norm = Normalize(vmin=-5.0, vmax=10.0)
     colors = cm.RdYlGn(norm(total_rewards))
-    
     for i in range(len(drone_pos) - 1):
         ax3d.plot(drone_pos[i:i+2, 0], drone_pos[i:i+2, 1], drone_pos[i:i+2, 2],
                 color=colors[i], linewidth=2.0)
-        
-        # Draw Star if Gate Passed (Total reward spike > 8.0)
+        # Mark gate passes (reward spikes)
         if total_rewards[i] > 8.0:
              ax3d.scatter(drone_pos[i,0], drone_pos[i,1], drone_pos[i,2], c='magenta', s=200, marker='*', zorder=10)
-
-    # Draw Gates
     for i in range(len(gates_ref)):
         rotate_and_draw_gate(ax3d, gates_ref[i, :3], gates_ref[i, 3], 1.0, 'red', i)
-    
-    # Start/End
-    ax3d.scatter(drone_pos[0,0], drone_pos[0,1], drone_pos[0,2], c='green', s=100, label='Start')
-    ax3d.scatter(drone_pos[-1,0], drone_pos[-1,1], drone_pos[-1,2], c='black', marker='s', s=100, label='End')
-
-    # Formatting 3D
     ax3d.set_title(f"Episode {episode_idx} | Total Reward: {np.sum(total_rewards):.2f}")
-    ax3d.set_xlabel('X'); ax3d.set_ylabel('Y'); ax3d.set_zlabel('Z')
-    
-    # Limits
-    all_x = np.concatenate((drone_pos[:,0], gates_ref[:,0]))
-    all_y = np.concatenate((drone_pos[:,1], gates_ref[:,1]))
-    all_z = np.concatenate((drone_pos[:,2], gates_ref[:,2]))
-    max_range = np.array([all_x.ptp(), all_y.ptp(), all_z.ptp()]).max() / 2.0
-    mid_x, mid_y, mid_z = all_x.mean(), all_y.mean(), all_z.mean()
-    ax3d.set_xlim(mid_x - max_range, mid_x + max_range)
-    ax3d.set_ylim(mid_y - max_range, mid_y + max_range)
-    ax3d.set_zlim(mid_z - max_range, mid_z + max_range)
 
-    # --- BOTTOM PLOT: Reward Components ---
-    ax2 = fig.add_subplot(2, 1, 2)
+
+    # --- PLOT 2: Reward Components (Row 2) ---
+    ax2 = fig.add_subplot(5, 1, 2)
     steps = np.arange(len(total_rewards))
-    
-    # 1. Total Reward (Left Axis - Black)
     ax2.plot(steps, total_rewards, color='black', alpha=0.2, label='Total Reward')
-    ax2.set_ylabel('Total Reward', color='black', fontweight='bold')
-    ax2.set_ylim(-5, 12) # Fixed scale to see spikes
+    ax2.set_ylabel('Total Reward')
+    ax2.set_ylim(-5, 12)
     ax2.grid(True, alpha=0.3)
+    ax2.legend(loc='upper left')
 
-    # 2. Components (Right Axis - Colored)
     ax_right = ax2.twinx()
-    
-    # Progress (Green)
     ax_right.plot(steps, progress_rews, color='green', alpha=0.8, linewidth=1.5, label='Progress')
-    
-    # Perception (Blue)
     ax_right.plot(steps, perc_rewards, color='blue', linewidth=2.0, label='Perception')
-    
-    ax_right.set_ylabel('Shaping Rewards (Small Scale)', color='blue', fontweight='bold')
-    ax_right.set_ylim(-0.1, 0.2) # Zoom in to see the 0.07 scale
-    ax_right.tick_params(axis='y', labelcolor='blue')
-    
-    # Combined Legend
-    lines1, labels1 = ax2.get_legend_handles_labels()
-    lines2, labels2 = ax_right.get_legend_handles_labels()
-    ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
-    
-    ax2.set_xlabel('Simulation Step')
-    ax2.set_title("Reward Component Analysis (Stored Data)")
-    
+    ax_right.set_ylabel('Shaping Rewards', color='blue')
+    ax_right.legend(loc='upper right')
+    ax2.set_title("Reward Analysis")
+
+
+    # # --- PLOT 3: SPEED ANALYSIS (Row 3) ---
+    # ax3 = fig.add_subplot(5, 1, 3)
+    # ax3.plot(steps, speeds, color='red', linewidth=2.0, label='Speed (Displacement/Step)')
+    # gate_indices = np.where(total_rewards > 8.0)[0]
+    # if len(gate_indices) > 0:
+    #     ax3.scatter(gate_indices, speeds[gate_indices], color='magenta', marker='*', s=100, zorder=5, label='Gate Pass')
+    # ax3.set_ylabel('Speed Proxy', color='red', fontweight='bold')
+    # ax3.grid(True, alpha=0.3)
+    # ax3.legend()
+
+
+    # --- PLOT 4: ACTIONS (Row 4) ---
+    # Actions: [collective_thrust, roll_rate, pitch_rate, yaw_rate]
+    ax4 = fig.add_subplot(5, 1, 4)
+    if actions is not None and actions.shape[1] >= 4:
+        labels = ['Collective Thrust', 'Roll Rate', 'Pitch Rate', 'Yaw Rate']
+        colors_act = ['purple', 'red', 'green', 'blue']
+        for i in range(4):
+            ax4.plot(steps, actions[:, i], label=labels[i], color=colors_act[i], alpha=0.8)
+        ax4.set_title("Action Inputs (Thrust + Body Rates)")
+        ax4.set_ylabel("Action Value")
+        ax4.grid(True, alpha=0.3)
+        ax4.legend(loc='upper right', ncol=4)
+    else:
+        ax4.text(0.5, 0.5, "Actions data shape incorrect or missing", ha='center')
+
+
+    # --- PLOT 5: VELOCITIES (Row 5) ---
+    # Assuming 3 velocities (Vx, Vy, Vz)
+    ax5 = fig.add_subplot(5, 1, 5)
+    if velocities is not None and velocities.shape[1] >= 3:
+        v_labels = ['Vx', 'Vy', 'Vz']
+        v_colors = ['r', 'g', 'b']
+        for i in range(3):
+            ax5.plot(steps, velocities[:, i], label=v_labels[i], color=v_colors[i])
+        ax5.set_title("Drone Linear Velocities")
+        ax5.set_ylabel("m/s")
+        ax5.set_xlabel("Simulation Step")
+        ax5.grid(True, alpha=0.3)
+        ax5.legend(loc='upper right', ncol=3)
+    else:
+        ax5.text(0.5, 0.5, "Velocity data shape incorrect or missing", ha='center')
+
+
     # Save
     out_dir = os.path.join(run_dir, "3D_plots")
     os.makedirs(out_dir, exist_ok=True)
@@ -199,14 +219,22 @@ def run_analysis(log_dir, target_episode=None):
             
         path = os.path.join(traj_dir, f)
         
-        # Load data
-        drone_s, total_r, prog_r, perc_r, pen_r, gates_ref = load_robust_trajectory(path)
+        # Load data (Updated unpack signature)
+        drone_s, total_r, acts, vels, prog_r, perc_r, pen_r, gates_ref = load_robust_trajectory(path)
         
         if drone_s is not None:
-            save_p = plot_dashboard(drone_s, total_r, prog_r, perc_r, gates_ref, ep_idx, log_dir)
+            # Print shape for debugging
+            if acts is not None:
+                print(f"   [Debug] Loaded Actions shape: {acts.shape}")
+            
+            save_p = plot_dashboard(drone_s, total_r, acts, vels, prog_r, perc_r, gates_ref, ep_idx, log_dir)
             print(f"   -> Dashboard saved: {save_p}")
-            if total_r is not None and len(total_r) > 0:
-                 print(f"      Reward Sum: {np.sum(total_r):.2f}")
+
+def calculate_speed_proxy(drone_positions):
+    diffs = np.diff(drone_positions, axis=0)
+    speeds = np.linalg.norm(diffs, axis=1)
+    speeds = np.insert(speeds, 0, 0.0)
+    return speeds
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

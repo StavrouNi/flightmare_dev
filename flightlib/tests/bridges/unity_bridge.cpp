@@ -12,7 +12,7 @@ TEST(UnityBridge, Constructor) {
   bool unity_ready = false;
 
   // need to add a quad to connect to Flightmare
-  QuadrotorDynamics dyn = QuadrotorDynamics(1.0, 0.2);
+  QuadrotorDynamics dyn = QuadrotorDynamics(1.0);
   std::shared_ptr<Quadrotor> quad = std::make_shared<Quadrotor>(dyn);
   unity_bridge.addQuadrotor(quad);
 
@@ -29,7 +29,7 @@ TEST(UnityBridge, PointCloud) {
   UnityBridge unity_bridge;
 
   // need to add a quad to connect to Flightmare
-  QuadrotorDynamics dyn = QuadrotorDynamics(1.0, 0.2);
+  QuadrotorDynamics dyn = QuadrotorDynamics(1.0);
   std::shared_ptr<Quadrotor> quad = std::make_shared<Quadrotor>(dyn);
   unity_bridge.addQuadrotor(quad);
 
@@ -47,7 +47,7 @@ TEST(UnityBridge, PointCloud) {
 TEST(UnityBridge, HandleOutputRGB) {
   Logger logger{"Test HandleOutputRGB"};
   UnityBridge unity_bridge;
-  QuadrotorDynamics dyn = QuadrotorDynamics(1.0, 0.2);
+  QuadrotorDynamics dyn = QuadrotorDynamics(1.0);
   std::shared_ptr<Quadrotor> quad = std::make_shared<Quadrotor>(dyn);
   std::shared_ptr<RGBCamera> rgb = std::make_shared<RGBCamera>();
   quad->addRGBCamera(rgb);
@@ -75,7 +75,7 @@ TEST(UnityBridge, HandleOutputRGB) {
 TEST(UnityBridge, HandleOutputDepth) {
   Logger logger{"Test HandleOutputDepth"};
   UnityBridge unity_bridge;
-  QuadrotorDynamics dyn = QuadrotorDynamics(1.0, 0.2);
+  QuadrotorDynamics dyn = QuadrotorDynamics(1.0);
   std::shared_ptr<Quadrotor> quad = std::make_shared<Quadrotor>(dyn);
   std::shared_ptr<RGBCamera> rgb = std::make_shared<RGBCamera>();
   rgb->setPostProcesscing(std::vector<bool>{true, false, false});
@@ -104,7 +104,7 @@ TEST(UnityBridge, HandleOutputDepth) {
 TEST(UnityBridge, HandleOutputSegmentation) {
   Logger logger{"Test HandleOutputSegmentation"};
   UnityBridge unity_bridge;
-  QuadrotorDynamics dyn = QuadrotorDynamics(1.0, 0.2);
+  QuadrotorDynamics dyn = QuadrotorDynamics(1.0);
   std::shared_ptr<Quadrotor> quad = std::make_shared<Quadrotor>(dyn);
   std::shared_ptr<RGBCamera> rgb = std::make_shared<RGBCamera>();
   rgb->setPostProcesscing(std::vector<bool>{false, true, false});
@@ -133,7 +133,7 @@ TEST(UnityBridge, HandleOutputSegmentation) {
 TEST(UnityBridge, HandleOutputOpticalFlow) {
   Logger logger{"Test HandleOutputOpticalFlow"};
   UnityBridge unity_bridge;
-  QuadrotorDynamics dyn = QuadrotorDynamics(1.0, 0.2);
+  QuadrotorDynamics dyn = QuadrotorDynamics(1.0);
   std::shared_ptr<Quadrotor> quad = std::make_shared<Quadrotor>(dyn);
   std::shared_ptr<RGBCamera> rgb = std::make_shared<RGBCamera>();
   rgb->setPostProcesscing(std::vector<bool>{false, false, true});
@@ -163,7 +163,7 @@ TEST(UnityBridge, HandleOutputOpticalFlow) {
 TEST(UnityBridge, SpawnStaticGate) {
   Logger logger{"Test SpawnStaticGate"};
   UnityBridge unity_bridge;
-  QuadrotorDynamics dyn = QuadrotorDynamics(1.0, 0.2);
+  QuadrotorDynamics dyn = QuadrotorDynamics(1.0);
   std::shared_ptr<Quadrotor> quad = std::make_shared<Quadrotor>(dyn);
   flightlib::QuadState state;
   state.setZero();
@@ -189,7 +189,7 @@ TEST(UnityBridge, SpawnStaticGate) {
 TEST(UnityBridge, Spawn100StaticGate) {
   Logger logger{"Test Spawn100StaticGate"};
   UnityBridge unity_bridge;
-  QuadrotorDynamics dyn = QuadrotorDynamics(1.0, 0.2);
+  QuadrotorDynamics dyn = QuadrotorDynamics(1.0);
   std::shared_ptr<Quadrotor> quad = std::make_shared<Quadrotor>(dyn);
   flightlib::QuadState state;
   state.setZero();

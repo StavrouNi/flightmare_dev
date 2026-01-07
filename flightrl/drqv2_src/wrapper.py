@@ -9,8 +9,9 @@ from flightgym import QuadrotorEnv_v1
 from rpg_baselines.envs import vec_env_wrapper as wrapper
 
 CRASH_PENALTY = -4.0
+PROGRESS_REWARD_SCALE = 0.5
 BODY_RATE_PENALTY_SCALE = 0.02
-PERCEPTION_REWARD_SCALE = 0.07
+PERCEPTION_REWARD_SCALE = 0.05
 GATE_HALF_WIDTH = 1.0 
 PASS_GATE_REWARD = 10.0
 
@@ -28,7 +29,17 @@ class FlightmareDrQWrapper(gym.Env):
         self.env = wrapper.FlightEnvVec(QuadrotorEnv_v1(cfg_str, False))
 
         # 3. Spaces
-        self.action_space = gym.spaces.Box(-1, 1, shape=(4,), dtype=np.float32)
+        # Actions: [collective_thrust, roll_rate, pitch_rate, yaw_rate]
+        # DrQv2 outputs actions in [-1, 1] for all dimensions (due to tanh)
+        # We remap in step(): thrust [-1,1]→[0,1], body_rates stay [-1,1]
+        # Final mapping: collective_thrust: [0, 1] → scaled to [0, max_thrust] in C++
+        #                body_rates: [-1, 1] → scaled to [-omega_max, omega_max] in C++
+        self.action_space = gym.spaces.Box(
+            low=np.array([-1.0, -1.0, -1.0, -1.0], dtype=np.float32),
+            high=np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
+            dtype=np.float32
+        )
+        print(f"[Wrapper] Action space set to {self.action_space}")
         self.stack_frames = stack_frames
         self.channels = 3 * stack_frames 
         self.observation_space = gym.spaces.Box(0, 255, shape=(self.channels, 84, 84), dtype=np.uint8)
@@ -43,9 +54,16 @@ class FlightmareDrQWrapper(gym.Env):
         print("[Wrapper] Connecting to Unity now...")
         self.env.connectUnity()
         print("[Wrapper] Warming up Unity Bridge...")
-        warmup_action = np.zeros((1, 4), dtype=np.float32)
+        # Warmup action: thrust=0 in [-1,1] maps to 0.5 in [0,1] after remapping
+        # This gives ~half max thrust for stable warmup
+        warmup_action = np.array([[0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
+        print(f"[Wrapper] Warmup action (pre-remap): {warmup_action}")
         for _ in range(10):
-            self.env.step(warmup_action)
+            # Remap: thrust from [-1,1] to [0,1]
+            remapped = warmup_action.copy()
+            remapped[0, 0] = (warmup_action[0, 0] + 1.0) / 2.0
+            print(f"[Wrapper] Warmup action (post-remap): {remapped}")
+            self.env.step(remapped)
 
     def _load_gates_from_file(self):
         fm_path = os.getenv("FLIGHTMARE_PATH")
@@ -100,8 +118,22 @@ class FlightmareDrQWrapper(gym.Env):
         return self._get_stacked_obs()
 
     def step(self, action):
-        # 1. Step Physics
-        action_vec = np.expand_dims(action, axis=0) 
+        # 1. Remap action from [-1, 1] (DrQv2 output) to [0, 1] for thrust, [-1, 1] for body rates
+        # DrQv2 actor outputs actions in [-1, 1] due to tanh squashing
+        # We need: thrust ∈ [0, 1], body_rates ∈ [-1, 1]
+        remapped_action = action.copy()
+        remapped_action[0] = (action[0] + 1.0) / 2.0  # [-1, 1] → [0, 1] for thrust
+        # body rates [1:4] already in [-1, 1], no change needed
+        
+        action_vec = np.expand_dims(remapped_action, axis=0) 
+        
+        # DEBUG: Log first few steps
+        if not hasattr(self, '_step_count'):
+            self._step_count = 0
+        if self._step_count < 5:
+            print(f"[Step {self._step_count}] Raw action: {action}, Remapped: {remapped_action}")
+        self._step_count += 1
+        
         obs_state, raw_rewards, cpp_done, info = self.env.step(action_vec)
         cpp_crash = cpp_done[0]
         
@@ -111,6 +143,10 @@ class FlightmareDrQWrapper(gym.Env):
         # drone_quat = full_state[3:7]  # [x, y, z, w]
         drone_vel = full_state[7:10]   # [vx, vy, vz]
         body_rates = full_state[10:13] # [wx, wy, wz]
+
+        # DEBUG: Log state in first few steps
+        if self._step_count <= 5:
+            print(f"[Step {self._step_count}] Pos: {drone_pos}, Vel: {drone_vel}")
 
         qx, qy, qz, qw = full_state[3:7] # [x, y, z, w]
 
@@ -136,7 +172,7 @@ class FlightmareDrQWrapper(gym.Env):
         high_body_rates_penalty = np.linalg.norm(body_rates)
 
         # D. Total Reward
-        reward = (1.0 * progress) + \
+        reward = (PROGRESS_REWARD_SCALE * progress) + \
                  (PERCEPTION_REWARD_SCALE * r_perc) - \
                  (BODY_RATE_PENALTY_SCALE * high_body_rates_penalty)
         
@@ -161,6 +197,7 @@ class FlightmareDrQWrapper(gym.Env):
             total_reward = reward + CRASH_PENALTY
             
             info = {
+                "action": remapped_action,  # Save the REMAPPED action
                 "gate_passed": gate_passed,         # True
                 "gate_idx": self.current_gate_idx,  # The gate we just passed
                 "collision": True
@@ -179,6 +216,7 @@ class FlightmareDrQWrapper(gym.Env):
             "pos": drone_pos, 
             "vel": drone_vel,
             "quat": drone_quat,
+            "action": remapped_action,  # Save the REMAPPED action that was actually executed
             "gate_idx": self.current_gate_idx,
             "gate_passed": gate_passed,
             "dist_to_gate": curr_dist,

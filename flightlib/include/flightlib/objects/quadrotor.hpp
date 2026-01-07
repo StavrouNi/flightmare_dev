@@ -17,7 +17,7 @@ class Quadrotor : ObjectBase {
  public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   Quadrotor(const std::string& cfg_path);
-  Quadrotor(const QuadrotorDynamics& dynamics = QuadrotorDynamics(1.0, 0.25));
+  Quadrotor(const QuadrotorDynamics& dynamics = QuadrotorDynamics(1.0));
   ~Quadrotor();
 
   // reset
