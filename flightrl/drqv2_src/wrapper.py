@@ -10,7 +10,7 @@ from rpg_baselines.envs import vec_env_wrapper as wrapper
 
 CRASH_PENALTY = -4.0
 PROGRESS_REWARD_SCALE = 0.5
-BODY_RATE_PENALTY_SCALE = 0.02
+BODY_RATE_PENALTY_SCALE = 0.005  # Reduced to allow aggressive maneuvering
 PERCEPTION_REWARD_SCALE = 0.05
 GATE_HALF_WIDTH = 1.0 
 PASS_GATE_REWARD = 10.0
@@ -246,10 +246,9 @@ class FlightmareDrQWrapper(gym.Env):
     def _compute_perception_components(self, drone_pos, drone_quat, target_pos):
         target_vector = target_pos - drone_pos
         dist_to_gate = np.linalg.norm(target_vector)
-        
-        if dist_to_gate < 0.2: return 1.0, 1.0
-        
-        target_vector_norm = target_vector / dist_to_gate
+
+        # Always compute perception properly (removed early return exploit)
+        target_vector_norm = target_vector / (dist_to_gate + 1e-6)
         
         # 30 deg Camera Tilt
         angle = 0.5236 

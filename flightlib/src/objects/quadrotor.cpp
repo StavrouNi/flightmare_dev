@@ -82,6 +82,18 @@ bool Quadrotor::run(const Scalar ctl_dt) {
 
     //
     state_.x = next_state.x;
+
+    // Cap velocity to match DreamerV3 paper performance (max ~8-9 m/s)
+    const Scalar MAX_VELOCITY = 8.5;
+    Vector<3> velocity(state_.x(QS::VELX), state_.x(QS::VELY), state_.x(QS::VELZ));
+    Scalar vel_mag = velocity.norm();
+    if (vel_mag > MAX_VELOCITY) {
+      velocity = velocity * (MAX_VELOCITY / vel_mag);
+      state_.x(QS::VELX) = velocity(0);
+      state_.x(QS::VELY) = velocity(1);
+      state_.x(QS::VELZ) = velocity(2);
+    }
+
     remain_ctl_dt -= sim_dt;
   }
   state_.t += ctl_dt;
